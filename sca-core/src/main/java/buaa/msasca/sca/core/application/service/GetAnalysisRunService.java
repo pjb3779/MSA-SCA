@@ -13,6 +13,7 @@ public class GetAnalysisRunService implements GetAnalysisRunUseCase {
         this.analysisRunPort = analysisRunPort;
     }
 
+    // persistence 계층에서 analysis_run을 조회
     @Override
     public Optional<AnalysisRun> findById(Long analysisRunId) {
         return analysisRunPort.findById(analysisRunId);

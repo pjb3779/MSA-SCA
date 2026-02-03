@@ -12,6 +12,7 @@ public class PrepareSourceCacheService implements PrepareSourceCacheUseCase {
     }
 
     @Override
+    //실제 DB변경은 포트에 위임
     public ProjectVersionSourceCache handle(Command command) {
         return commandPort.createNewValid(command.projectVersionId(), command.storagePath(), command.expiresAt());
     }

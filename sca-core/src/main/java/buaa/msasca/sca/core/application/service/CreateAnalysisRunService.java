@@ -14,6 +14,10 @@ public class CreateAnalysisRunService implements CreateAnalysisRunUseCase {
         this.sourceCachePort = sourceCachePort;
     }
 
+    /**
+     * analysis_run 생성의 진입점
+     * 캐시 사전 검증 진행후 문제없을시 analysis_run 생성
+     */
     @Override
     public AnalysisRun handle(Command command) {
         if (command.requireSourceCache()) {

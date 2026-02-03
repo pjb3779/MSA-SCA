@@ -22,6 +22,14 @@ public class JpaProjectAdapter implements ProjectPort {
 
     @Override
     @Transactional
+    public Project create(String name, String description, String repoUrl) {
+        ProjectEntity e = ProjectEntity.create(name, description, repoUrl);
+        ProjectEntity saved = repo.save(e);
+        return mapper.toDomain(saved);
+    }
+  
+    @Override
+    @Transactional
     public Project save(Project project) {
         if (project.id() == null) {
         ProjectEntity created = ProjectEntity.create(project.name(), project.description(), project.repoUrl());

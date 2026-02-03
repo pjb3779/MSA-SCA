@@ -1,0 +1,17 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sca
+    username: sca
+    password: sca
+  jpa:
+    hibernate:
+      ddl-auto: update
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

@@ -4,17 +4,13 @@ import java.time.Instant;
 
 import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
 
-public interface PrepareSourceCacheUseCase {
+public interface PrepareSourceCacheAutoUseCase {
+    
     ProjectVersionSourceCache handle(Command command);
-
-    /**
-     * project_version에 대한 캐쉬를 등록
-     * 기존 캐시가 있으면 모두 invalidate
-     * Storage패쓰를 기준
-     */
+    
     record Command(
         Long projectVersionId,
-        String storagePath,
-        Instant expiresAt
+        Instant expiresAt,
+        boolean forceRefresh
     ) {}
 }
