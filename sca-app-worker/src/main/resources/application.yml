@@ -1,17 +1,17 @@
-server:
-  port: 8081
-
 spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/sca
-    username: sca
-    password: sca
-  jpa:
-    hibernate:
-      ddl-auto: update
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
+  config:
+    import: "classpath:application-common.yml"
+logging:
+  level:
+    org.springframework.boot.context.config: DEBUG
+sca:
+  build:
+    images:
+      default-image: maven:3.9-eclipse-temurin-17
+      rules:
+        - build-tool: MAVEN
+          jdk-version: "*"
+          image: maven:3.9-eclipse-temurin-17
+        - build-tool: GRADLE
+          jdk-version: "*"
+          image: gradle:8.7-jdk17

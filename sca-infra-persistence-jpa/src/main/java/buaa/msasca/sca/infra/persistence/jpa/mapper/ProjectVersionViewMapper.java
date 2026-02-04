@@ -6,7 +6,7 @@ import buaa.msasca.sca.infra.persistence.jpa.entity.project.ProjectVersionEntity
 public class ProjectVersionViewMapper {
     
     //조회용으로 변환
-    public ProjectVersionView toView(ProjectVersionEntity e) {
+    public ProjectVersionView toDomain(ProjectVersionEntity e) {
         return new ProjectVersionView(
             e.getId(),
             e.getProject().getId(),

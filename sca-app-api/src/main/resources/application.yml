@@ -1,23 +1,12 @@
+spring:
+  config:
+    import: "classpath:application-common.yml"
+
 server:
   port: 8080
 
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/sca
-    username: sca
-    password: sca
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        format_sql: true
-  jackson:
-    serialization:
-      WRITE_DATES_AS_TIMESTAMPS: false
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
+sca:
+  workspace:
+    base-dir: "C:/msasca"
+  storage:
+    base-dir: "C:/msasca/storage"

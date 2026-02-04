@@ -1,13 +1,15 @@
 services:
-  postgres:
+  postgres: 
     image: postgres:16
+    container_name: msasca-postgres
     environment:
-      POSTGRES_DB: sca
-      POSTGRES_USER: sca
-      POSTGRES_PASSWORD: sca
+      POSTGRES_DB: msasca
+      POSTGRES_USER: msasca
+      POSTGRES_PASSWORD: msasca
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - msasca_pg:/var/lib/postgresql/data
+
 volumes:
-  pgdata:
+  msasca_pg:

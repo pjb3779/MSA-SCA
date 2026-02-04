@@ -14,7 +14,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
 @RestController
-@RequestMapping("/api/v1/projects")
+@RequestMapping("/api/projects")
 public class ProjectController {
 
     private final CreateProjectUseCase createProjectUseCase;

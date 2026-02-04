@@ -1,7 +1,7 @@
 package buaa.msasca.sca.core.application.usecase;
 
 public interface CreateProjectUseCase {
-  Response create(Request request);
+  Response create(Request req);
 
   record Request(String name) {}
 

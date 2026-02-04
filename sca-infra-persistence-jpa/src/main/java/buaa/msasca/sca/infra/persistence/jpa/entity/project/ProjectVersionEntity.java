@@ -101,4 +101,10 @@ public class ProjectVersionEntity extends AuditedEntity {
     public void markRunning() { this.status = RunStatus.RUNNING; }
     public void markDone() { this.status = RunStatus.DONE; }
     public void markFailed() { this.status = RunStatus.FAILED; }
+    /**
+     * @param uploadFilePath 업로드 zip 로컬 경로
+     */
+    public void changeUploadFilePath(String uploadFilePath) {
+        this.uploadFilePath = uploadFilePath;
+    }
 }

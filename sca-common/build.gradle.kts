@@ -1,4 +1,8 @@
+plugins {
+    id("java-library")
+}
+
 dependencies {
-  api("org.slf4j:slf4j-api")
-  api("com.fasterxml.jackson.core:jackson-databind")
+    api("org.slf4j:slf4j-api")
+    api("com.fasterxml.jackson.core:jackson-databind")
 }
