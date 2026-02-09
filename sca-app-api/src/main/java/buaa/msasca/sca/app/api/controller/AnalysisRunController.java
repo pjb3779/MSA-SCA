@@ -11,8 +11,8 @@ import buaa.msasca.sca.app.api.dto.CreateAnalysisRunRequest;
 import buaa.msasca.sca.core.port.in.CreateAnalysisRunUseCase;
 import buaa.msasca.sca.core.port.in.GetAnalysisRunUseCase;
 
-@RestController
-@RequestMapping("/api")
+// @RestController
+// @RequestMapping("/api")
 public class AnalysisRunController {
     
     // private final CreateAnalysisRunUseCase createUseCase;

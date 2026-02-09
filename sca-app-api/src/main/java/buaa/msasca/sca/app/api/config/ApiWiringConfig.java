@@ -12,6 +12,7 @@ import buaa.msasca.sca.core.application.usecase.GetProjectUseCase;
 import buaa.msasca.sca.core.port.out.persistence.ProjectPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionPort;
+import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCacheCommandPort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionAdapter;
@@ -100,20 +101,30 @@ public class ApiWiringConfig {
         WorkspacePathResolver pathResolver
     ) {
       return new CreateProjectVersionFromGitService(
-          projectPort, projectVersionPort, cacheCommandPort, runnerPort, pathResolver
+          projectPort, 
+          projectVersionPort, 
+          cacheCommandPort, 
+          runnerPort, 
+          pathResolver
       );
     }
 
     @Bean
     public CreateProjectVersionFromZipUseCase createProjectVersionFromZipUseCase(
-        ProjectPort projectPort,
-        ProjectVersionPort projectVersionPort,
-        ProjectVersionCommandPort projectVersionCommandPort,
-        JpaProjectVersionSourceCacheAdapter cacheCommandPort,  // ✅ 여기 변경
-        WorkspacePathResolver pathResolver
-    ) {
-      return new CreateProjectVersionFromZipService(
-          projectPort, projectVersionPort, projectVersionCommandPort, cacheCommandPort, pathResolver
-      );
-    }
+      ProjectPort projectPort,
+      ProjectVersionPort projectVersionPort,
+      ProjectVersionCommandPort projectVersionCommandPort,
+      ProjectVersionSourceCacheCommandPort cacheCommandPort,
+      WorkspacePathResolver pathResolver,
+      RunnerPort runnerPort
+  ) {
+    return new CreateProjectVersionFromZipService(
+        projectPort,
+        projectVersionPort,
+        projectVersionCommandPort,
+        cacheCommandPort,
+        pathResolver,
+        runnerPort
+    );
+  }
 }
