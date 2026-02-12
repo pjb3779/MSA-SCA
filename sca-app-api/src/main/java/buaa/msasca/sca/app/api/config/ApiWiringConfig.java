@@ -3,6 +3,7 @@ package buaa.msasca.sca.app.api.config;
 import buaa.msasca.sca.core.application.service.CreateProjectService;
 import buaa.msasca.sca.core.application.service.CreateProjectVersionFromGitService;
 import buaa.msasca.sca.core.application.service.CreateProjectVersionFromZipService;
+import buaa.msasca.sca.core.application.service.EnqueueAnalysisRunOnSourceReadyService;
 import buaa.msasca.sca.core.application.service.GetProjectService;
 import buaa.msasca.sca.core.application.support.WorkspacePathResolver;
 import buaa.msasca.sca.core.application.usecase.CreateProjectUseCase;
@@ -14,109 +15,75 @@ import buaa.msasca.sca.core.port.out.persistence.ProjectVersionCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCacheCommandPort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
-import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
-import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionAdapter;
-import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionSourceCacheAdapter;
-import buaa.msasca.sca.infra.persistence.jpa.mapper.ProjectMapper;
-import buaa.msasca.sca.infra.persistence.jpa.mapper.ProjectVersionViewMapper;
-import buaa.msasca.sca.infra.persistence.jpa.mapper.SourceCacheMapper;
-import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectJpaRepository;
-import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionJpaRepository;
-import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionSourceCacheJpaRepository;
 import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 @Configuration
 public class ApiWiringConfig {
 
-    /** mapper beans */
-    @Bean public ProjectMapper projectMapper() { return new ProjectMapper(); }
-    @Bean public ProjectVersionViewMapper projectVersionMapper() { return new ProjectVersionViewMapper(); }
-    @Bean public SourceCacheMapper sourceCacheMapper() { return new SourceCacheMapper(); }
+  /** 로컬 실행 RunnerPort */
+  @Bean
+  public RunnerPort runnerPort() {
+    return new LocalProcessRunnerPortAdapter();
+  }
 
-    /** ports(adapters) */
-    @Bean
-    public ProjectPort projectPort(ProjectJpaRepository repo, ProjectMapper mapper) {
-      return new JpaProjectAdapter(repo, mapper);
-    }
+  /** workspace path resolver: Windows 경로 */
+  @Bean
+  public WorkspacePathResolver workspacePathResolver() {
+    return new WorkspacePathResolver("C:/msasca");
+  }
 
-    @Bean
-    public JpaProjectVersionAdapter projectVersionAdapter(
-        ProjectVersionJpaRepository repo,
-        ProjectJpaRepository projectRepo,
-        ProjectVersionViewMapper mapper
-    ) {
-      return new JpaProjectVersionAdapter(repo, projectRepo, mapper);
-    }
+  /** usecases */
+  @Bean
+  public CreateProjectUseCase createProjectUseCase(ProjectPort projectPort) {
+    return new CreateProjectService(projectPort);
+  }
 
-    @Bean
-    public ProjectVersionPort projectVersionPort(JpaProjectVersionAdapter a) {
-      return a;
-    }
+  @Bean
+  public GetProjectUseCase getProjectUseCase(ProjectPort projectPort) {
+    return new GetProjectService(projectPort);
+  }
 
-    @Bean
-    public ProjectVersionCommandPort projectVersionCommandPort(JpaProjectVersionAdapter a) {
-      return a;
-    }
+  @Bean
+  public EnqueueAnalysisRunOnSourceReadyService enqueueAnalysisRunOnSourceReadyService(
+      buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort analysisRunCommandPort,
+      ObjectMapper objectMapper
+  ) {
+    return new EnqueueAnalysisRunOnSourceReadyService(analysisRunCommandPort, objectMapper);
+  }
 
-    @Bean
-    public RunnerPort runnerPort() {
-      return new LocalProcessRunnerPortAdapter();
-    }
-    
-    @Bean
-    public JpaProjectVersionSourceCacheAdapter pvSourceCacheAdapter(
-        ProjectVersionSourceCacheJpaRepository cacheRepo,
-        ProjectVersionJpaRepository pvRepo,
-        SourceCacheMapper mapper
-    ) {
-      return new JpaProjectVersionSourceCacheAdapter(cacheRepo, pvRepo, mapper);
-    }
+  @Bean
+  public CreateProjectVersionFromGitUseCase createProjectVersionFromGitUseCase(
+      ProjectPort projectPort,
+      ProjectVersionPort projectVersionPort,
+      ProjectVersionSourceCacheCommandPort cacheCommandPort,
+      RunnerPort runnerPort,
+      WorkspacePathResolver pathResolver,
+      EnqueueAnalysisRunOnSourceReadyService enqueueService
+  ) {
+    return new CreateProjectVersionFromGitService(
+        projectPort,
+        projectVersionPort,
+        cacheCommandPort,
+        runnerPort,
+        pathResolver,
+        enqueueService
+    );
+  }
 
-    /** workspace path resolver: Windows 경로로 바꾼 설정과 맞춰서 */
-    @Bean
-    public WorkspacePathResolver workspacePathResolver() {
-      return new WorkspacePathResolver("C:/msasca");
-    }
-
-    /** usecases */
-    @Bean
-    public CreateProjectUseCase createProjectUseCase(ProjectPort projectPort) {
-      return new CreateProjectService(projectPort);
-    }
-
-    @Bean
-    public GetProjectUseCase getProjectUseCase(ProjectPort projectPort) {
-      return new GetProjectService(projectPort);
-    }
-
-    @Bean
-    public CreateProjectVersionFromGitUseCase createProjectVersionFromGitUseCase(
-        ProjectPort projectPort,
-        ProjectVersionPort projectVersionPort,
-        JpaProjectVersionSourceCacheAdapter cacheCommandPort,
-        RunnerPort runnerPort,
-        WorkspacePathResolver pathResolver
-    ) {
-      return new CreateProjectVersionFromGitService(
-          projectPort, 
-          projectVersionPort, 
-          cacheCommandPort, 
-          runnerPort, 
-          pathResolver
-      );
-    }
-
-    @Bean
-    public CreateProjectVersionFromZipUseCase createProjectVersionFromZipUseCase(
+  @Bean
+  public CreateProjectVersionFromZipUseCase createProjectVersionFromZipUseCase(
       ProjectPort projectPort,
       ProjectVersionPort projectVersionPort,
       ProjectVersionCommandPort projectVersionCommandPort,
       ProjectVersionSourceCacheCommandPort cacheCommandPort,
       WorkspacePathResolver pathResolver,
-      RunnerPort runnerPort
+      RunnerPort runnerPort,
+      EnqueueAnalysisRunOnSourceReadyService enqueueService
   ) {
     return new CreateProjectVersionFromZipService(
         projectPort,
@@ -124,7 +91,8 @@ public class ApiWiringConfig {
         projectVersionCommandPort,
         cacheCommandPort,
         pathResolver,
-        runnerPort
+        runnerPort,
+        enqueueService
     );
   }
 }

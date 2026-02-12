@@ -27,6 +27,8 @@ public class CreateProjectVersionFromZipService implements CreateProjectVersionF
   private final ProjectVersionSourceCacheCommandPort cacheCommandPort;
   private final WorkspacePathResolver pathResolver;
 
+  private final EnqueueAnalysisRunOnSourceReadyService enqueueService;
+
   private final RunnerPort runnerPort;
 
   public CreateProjectVersionFromZipService(
@@ -35,7 +37,8 @@ public class CreateProjectVersionFromZipService implements CreateProjectVersionF
       ProjectVersionCommandPort projectVersionCommandPort,
       ProjectVersionSourceCacheCommandPort cacheCommandPort,
       WorkspacePathResolver pathResolver,
-      RunnerPort runnerPort
+      RunnerPort runnerPort,
+      EnqueueAnalysisRunOnSourceReadyService enqueueService
   ) {
     this.projectPort = projectPort;
     this.projectVersionPort = projectVersionPort;
@@ -43,6 +46,7 @@ public class CreateProjectVersionFromZipService implements CreateProjectVersionF
     this.cacheCommandPort = cacheCommandPort;
     this.pathResolver = pathResolver;
     this.runnerPort = runnerPort;
+    this.enqueueService = enqueueService;
   }
 
   /**
@@ -87,6 +91,9 @@ public class CreateProjectVersionFromZipService implements CreateProjectVersionF
 
     // 6) source cache 생성
     cacheCommandPort.createNewValid(pv.id(), sourceRoot, req.expiresAt());
+
+    //source_cache가 valid 된 뒤 analysis_run 자동 생성
+    enqueueService.enqueueIfAbsent(pv.id(), null, "system");
 
     return new Response(pv.id(), sourceRoot, uploadZipPath);
   }

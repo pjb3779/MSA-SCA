@@ -77,6 +77,17 @@ public class ServiceModuleEntity extends AuditedEntity {
         return new ServiceModuleEntity(pv, name, rootPath, buildTool, jdkVersion, gateway);
     }
 
-    public void markGateway(boolean gateway) { this.gateway = gateway; }
-    public void changeBuildTool(BuildTool tool) { this.buildTool = tool; }
+    public void changeRootPath(String newRootPath) {
+        this.rootPath = newRootPath;
+    }
+    public void changeBuildTool(buaa.msasca.sca.core.domain.enums.BuildTool newBuildTool) {
+        this.buildTool = newBuildTool;
+    }
+    public void changeJdkVersion(String newJdkVersion) {
+        this.jdkVersion = newJdkVersion;
+    }
+
+    public void changeGateway(boolean gateway) {
+        this.gateway = gateway;
+    }
 }

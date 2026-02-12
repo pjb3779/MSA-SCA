@@ -25,8 +25,10 @@ import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
 import buaa.msasca.sca.core.domain.model.ServiceModule;
 import buaa.msasca.sca.core.domain.model.ToolRun;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
-import buaa.msasca.sca.core.port.out.persistence.AnalysisRunPort;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
+import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunPort;
@@ -34,12 +36,14 @@ import buaa.msasca.sca.core.port.out.tool.AgentPort;
 import buaa.msasca.sca.core.port.out.tool.BuildImageResolver;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
 import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
+import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
+import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 
 public class PipelineExecutor {
 
-  private final AnalysisRunPort analysisRunPort;
+  private final AnalysisRunCommandPort analysisRunCommandPort;
   private final ServiceModulePort serviceModulePort;
   private final ProjectVersionSourceCachePort sourceCachePort;
 
@@ -52,14 +56,20 @@ public class PipelineExecutor {
   private final BuildPort buildPort;
   private final BuildImageResolver buildImageResolver;
 
+  private final DockerImagePort dockerImagePort;
+
   private final CodeqlPort codeqlPort;
   private final AgentPort agentPort;
   private final MscanPort mscanPort;
 
+  private final ServiceModuleScannerPort serviceModuleScannerPort;
+  private final ServiceModuleCommandPort serviceModuleCommandPort;
+
+
   private final ObjectMapper om = new ObjectMapper();
 
   public PipelineExecutor(
-      AnalysisRunPort analysisRunPort,
+      AnalysisRunCommandPort analysisRunCommandPort,
       ServiceModulePort serviceModulePort,
       ProjectVersionSourceCachePort sourceCachePort,
       ToolRunCommandPort toolRunCommandPort,
@@ -68,11 +78,14 @@ public class PipelineExecutor {
       StoragePort storagePort,
       BuildPort buildPort,
       BuildImageResolver buildImageResolver,
+      DockerImagePort dockerImagePort,
       CodeqlPort codeqlPort,
       AgentPort agentPort,
-      MscanPort mscanPort
+      MscanPort mscanPort,
+      ServiceModuleScannerPort serviceModuleScannerPort,
+      ServiceModuleCommandPort serviceModuleCommandPort
   ) {
-    this.analysisRunPort = analysisRunPort;
+    this.analysisRunCommandPort = analysisRunCommandPort;
     this.serviceModulePort = serviceModulePort;
     this.sourceCachePort = sourceCachePort;
     this.toolRunCommandPort = toolRunCommandPort;
@@ -81,9 +94,12 @@ public class PipelineExecutor {
     this.storagePort = storagePort;
     this.buildPort = buildPort;
     this.buildImageResolver = buildImageResolver;
+    this.dockerImagePort = dockerImagePort;
     this.codeqlPort = codeqlPort;
     this.agentPort = agentPort;
     this.mscanPort = mscanPort;
+    this.serviceModuleScannerPort = serviceModuleScannerPort;
+    this.serviceModuleCommandPort = serviceModuleCommandPort;
   }
 
   /**
@@ -91,59 +107,63 @@ public class PipelineExecutor {
    * 실행 흐름:
    * 1) 입력 조회/검증(PENDING만 실행)
    * 2) source cache 조회
-   * 3) service module 조회
-   * 4) RUNNING 전이
-   * 5) 단계 실행(빌드→코드큐엘→에이전트→엠스캔)  ※ 순서는 여기서 바꾸면 됨
-   * 6) 성공 시 DONE, 실패 시 FAILED
+   * 3) service module 스캔 & upsert
+   * 4) service module 조회
+   * 5) RUNNING 전이
+   * 6) 빌드 이미지 선-ensure(distinct)
+   * 7) 단계 실행(BUILD→CODEQL→AGENT→MSCAN)
+   * 8) 성공 시 DONE, 실패 시 FAILED
    *
+   * // 상태 전이(markRunning/markDone/markFailed)는 RunPollingJob가 책임
    * @param analysisRunId 실행할 analysis_run ID
    */
   public void execute(Long analysisRunId) {
-    AnalysisRun run = loadPendingRunOrReturn(analysisRunId);
+    AnalysisRun run = loadRunOrThrow(analysisRunId);
     if (run == null) return;
 
     ProjectVersionSourceCache cache = loadSourceCacheOrThrow(run.projectVersionId());
     String sourceRootPath = cache.storagePath();
 
+    scanAndUpsertServiceModules(run.projectVersionId(), sourceRootPath, 6);
+
     List<ServiceModule> modules = serviceModulePort.findByProjectVersionId(run.projectVersionId());
 
-    analysisRunPort.markRunning(analysisRunId);
+    if (modules.isEmpty()) {
+      throw new IllegalStateException("No service modules detected for projectVersionId=" + run.projectVersionId());
+    }
 
     try {
+      //모듈별 이미지 결정(파일 기반) + distinct 이미지 선-ensure
+      List<BuildPlan> buildPlans = prepareBuildPlans(modules, sourceRootPath);
+      ensureBuildImages(buildPlans, Duration.ofMinutes(20));
       /////////////////////////////////////////////////////////////////////////////////////
       /// (현재) 단계 순서: BUILD -> CODEQL -> AGENT -> MSCAN
       /// 사용자가 제시한 최종 순서로 바꾸려면 아래 호출 순서만 재배치하면 됨.
       /////////////////////////////////////////////////////////////////////////////////////
 
-      runBuildStage(analysisRunId, modules, sourceRootPath);
+      runBuildStage(analysisRunId, buildPlans, sourceRootPath);
 
-      runCodeqlStage(analysisRunId, modules, sourceRootPath);
+      // runCodeqlStage(analysisRunId, modules, sourceRootPath);
 
-      runAgentStage(analysisRunId, run.projectVersionId(), sourceRootPath);
+      // runAgentStage(analysisRunId, run.projectVersionId(), sourceRootPath);
 
-      runMscanStage(analysisRunId, run.projectVersionId(), sourceRootPath);
+      // runMscanStage(analysisRunId, run.projectVersionId(), sourceRootPath);
 
-      analysisRunPort.markDone(analysisRunId);
     } catch (Exception e) {
-      analysisRunPort.markFailed(analysisRunId);
+      //RunPollingjob이 Mark fail 처리 
       throw e;
     }
   }
 
   /**
-   * analysis_run을 조회하고 PENDING이 아니면 null을 반환한다.
+   * analysis_run을 조회한다.
    *
    * @param analysisRunId analysis_run ID
-   * @return PENDING이면 AnalysisRun, 아니면 null
+   * @return AnalysisRun
    */
-  private AnalysisRun loadPendingRunOrReturn(Long analysisRunId) {
-    AnalysisRun run = analysisRunPort.findById(analysisRunId)
+  private AnalysisRun loadRunOrThrow(Long analysisRunId) {
+    return analysisRunCommandPort.findById(analysisRunId)
         .orElseThrow(() -> new IllegalArgumentException("analysis_run not found: " + analysisRunId));
-
-    if (run.status() != RunStatus.PENDING) {
-      return null;
-    }
-    return run;
   }
 
   /**
@@ -175,44 +195,103 @@ public class PipelineExecutor {
     }
   }
 
+  /**
+   * 소스 루트를 스캔하여 service_module을 upsert한다.
+   *
+   * @param projectVersionId project_version ID
+   * @param sourceRootPath 소스 루트 경로
+   * @param maxDepth 탐색 깊이
+   */
+  private void scanAndUpsertServiceModules(Long projectVersionId, String sourceRootPath, int maxDepth) {
+    List<ServiceModuleScannerPort.DetectedServiceModule> detected =
+        serviceModuleScannerPort.scan(sourceRootPath, maxDepth);
+
+    for (ServiceModuleScannerPort.DetectedServiceModule d : detected) {
+      serviceModuleCommandPort.upsert(
+          projectVersionId,
+          d.name(),
+          d.rootPath(),
+          d.buildTool(),
+          d.jdkVersion(),
+          d.isGateway()
+      );
+    }
+  }
+
+  /////////////////////////////////////////////////////////////////////////////////////
+  /// BUILD 준비(이미지 결정 + 선-ensure)
+  /////////////////////////////////////////////////////////////////////////////////////
+
+  /**
+   * 모듈별 빌드 계획(이미지 포함)을 만든다.
+   * 이미지 결정은 BuildImageResolver(module, moduleDir)로 수행한다.
+   *
+   * @param modules 서비스 모듈 목록
+   * @param sourceRootPath 소스 루트 경로
+   * @return 빌드 계획 목록
+   */
+  private List<BuildPlan> prepareBuildPlans(List<ServiceModule> modules, String sourceRootPath) {
+    List<BuildPlan> plans = new ArrayList<>();
+    for (ServiceModule m : modules) {
+      Path moduleDir = Path.of(normalizeDir(sourceRootPath, m.rootPath()));
+      String image = buildImageResolver.resolve(m, moduleDir);
+      plans.add(new BuildPlan(m, moduleDir, image));
+    }
+    return List.copyOf(plans);
+  }
+
+  /**
+   * 빌드 단계 시작 전에 필요한 Docker 이미지들을 distinct로 선-ensure 한다.
+   *
+   * @param plans 빌드 계획 목록
+   * @param timeout ensure 타임아웃
+   */
+  private void ensureBuildImages(List<BuildPlan> plans, Duration timeout) {
+    plans.stream()
+        .map(BuildPlan::image)
+        .distinct()
+        .forEach(img -> {
+          try {
+            dockerImagePort.ensurePresent(img, timeout);
+          } catch (Exception e) {
+            throw new IllegalStateException("Docker image ensure failed: " + img, e);
+          }
+        });
+  }
+
+  /** BUILD 단계에서 사용할 내부 계획 레코드 */
+  private record BuildPlan(ServiceModule module, Path moduleDir, String image) {}
+  
   /////////////////////////////////////////////////////////////////////////////////////
   /// BUILD 메서드
   /////////////////////////////////////////////////////////////////////////////////////
 
-    /**
-     * BUILD 단계를 실행한다(서비스 모듈 단위).
-     * - tool_run 생성 후
-     * - BuildImageResolver로 이미지 선택(모듈 디렉토리 파일 기반)
-     * - BuildPort로 Docker 빌드 수행
-     * - 빌드 성공 시 JAR 자동 수집
-     *
-     * @param analysisRunId analysis_run ID
-     * @param modules 서비스 모듈 목록
-     * @param sourceRootPath 소스 루트 경로
-     */
-    private void runBuildStage(Long analysisRunId, List<ServiceModule> modules, String sourceRootPath) {
-      for (ServiceModule m : modules) {
+  /**
+   * BUILD 단계를 실행한다(서비스 모듈 단위).
+   * - BuildPlan에서 이미지가 이미 확정된 상태
+   * - tool_run 생성 시 config_json에 dockerImage 포함
+   * - BuildPort로 Docker 빌드 수행
+   * - 빌드 성공 시 JAR 자동 수집
+   *
+   * @param analysisRunId analysis_run ID
+   * @param plans 빌드 계획 목록(이미지 포함)
+   * @param sourceRootPath 소스 루트 경로
+   */
+  private void runBuildStage(Long analysisRunId, List<BuildPlan> plans, String sourceRootPath) {
+    for (BuildPlan plan : plans) {
+      ServiceModule m = plan.module();
+      String image = plan.image();
 
-        ToolRun tr = toolRunCommandPort.createBuildRun(
-            analysisRunId,
-            m.id(),
-            "docker-build",
-            buildConfigJson(m, null) // 아직 이미지 미확정
-        );
+      ToolRun tr = toolRunCommandPort.createBuildRun(
+          analysisRunId,
+          m.id(),
+          "docker-build",
+          buildConfigJson(m, image)
+      );
 
-        runTool(tr.id(), () -> {
-          Path moduleDir = Path.of(normalizeDir(sourceRootPath, m.rootPath()));
-
-          //파일 기반 이미지 선택
-          String image = buildImageResolver.resolve(m, moduleDir);
-
-          // 선택된 이미지는 로그로 남기기
-          storeTextArtifact(tr.id(), ArtifactType.OTHER, "build-image.log", "image=" + image);
-
-          buildModule(tr.id(), m, sourceRootPath, image);
-        });
-      }
+      runTool(tr.id(), () -> buildModule(tr.id(), m, sourceRootPath, image));
     }
+  }
 
   /**
    * 하나의 서비스 모듈을 빌드한다(Docker 기반).
@@ -688,7 +767,6 @@ public class PipelineExecutor {
     n.put("buildTool", m.buildTool().name());
     n.put("rootPath", m.rootPath());
     n.put("jdkVersion", m.jdkVersion() == null ? "" : m.jdkVersion());
-    n.put("dockerImage", image);
 
     if (image != null && !image.isBlank()) {
       n.put("dockerImage", image);

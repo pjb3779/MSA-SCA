@@ -2,15 +2,15 @@ package buaa.msasca.sca.core.application.service;
 
 import buaa.msasca.sca.core.application.usecase.GetRunUseCase;
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
-import buaa.msasca.sca.core.port.out.persistence.AnalysisRunPort;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 
 import java.util.Optional;
 
 public class RunService implements GetRunUseCase {
 
-  private final AnalysisRunPort analysisRunPort;
+  private final AnalysisRunCommandPort analysisRunPort;
 
-  public RunService(AnalysisRunPort analysisRunPort) {
+  public RunService(AnalysisRunCommandPort analysisRunPort) {
     this.analysisRunPort = analysisRunPort;
   }
 

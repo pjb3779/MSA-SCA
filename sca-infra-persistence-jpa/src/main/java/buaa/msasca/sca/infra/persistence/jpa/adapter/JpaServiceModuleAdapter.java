@@ -7,7 +7,7 @@ import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ServiceModuleMapper;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
 
-public class JpaServiceModuleAdapter implements  ServiceModulePort {
+public class JpaServiceModuleAdapter implements ServiceModulePort {
 
     private final ServiceModuleJpaRepository repo;
     private final ServiceModuleMapper mapper;
@@ -19,7 +19,7 @@ public class JpaServiceModuleAdapter implements  ServiceModulePort {
 
     @Override
     public List<ServiceModule> findByProjectVersionId(Long projectVersionId) {
-        return repo.findByProjectVersion_Id(projectVersionId).stream()
+        return repo.findByProjectVersionId(projectVersionId).stream()
             .map(mapper::toDomain)
             .toList();
     }

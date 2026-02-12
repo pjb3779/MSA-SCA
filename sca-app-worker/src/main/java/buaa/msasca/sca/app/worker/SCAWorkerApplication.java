@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {
-    "buaa.msasca.sca.app.worker"
+    "buaa.msasca.sca"
 })
 @EnableScheduling
 @EntityScan(basePackages = {

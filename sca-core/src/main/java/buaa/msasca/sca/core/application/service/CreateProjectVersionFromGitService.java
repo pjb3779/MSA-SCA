@@ -22,18 +22,22 @@ public class CreateProjectVersionFromGitService implements CreateProjectVersionF
     private final RunnerPort runnerPort;
     private final WorkspacePathResolver pathResolver;
 
+    private final EnqueueAnalysisRunOnSourceReadyService enqueueService;
+
     public CreateProjectVersionFromGitService(
         ProjectPort projectPort,
         ProjectVersionPort projectVersionPort,
         ProjectVersionSourceCacheCommandPort cacheCommandPort,
         RunnerPort runnerPort,
-        WorkspacePathResolver pathResolver
+        WorkspacePathResolver pathResolver,
+        EnqueueAnalysisRunOnSourceReadyService enqueueService
     ) {
         this.projectPort = projectPort;
         this.projectVersionPort = projectVersionPort;
         this.cacheCommandPort = cacheCommandPort;
         this.runnerPort = runnerPort;
         this.pathResolver = pathResolver;
+        this.enqueueService = enqueueService;;
     }
 
     /**
@@ -66,6 +70,9 @@ public class CreateProjectVersionFromGitService implements CreateProjectVersionF
         }
 
         cacheCommandPort.createNewValid(pv.id(), sourceRoot, req.expiresAt());
+
+        //source_cache가 valid 된 뒤 analysis_run 자동 생성
+        enqueueService.enqueueIfAbsent(pv.id(), null, "system");  
 
         return new Response(pv.id(), sourceRoot);
     }

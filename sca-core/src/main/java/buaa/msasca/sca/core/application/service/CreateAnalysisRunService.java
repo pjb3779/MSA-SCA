@@ -2,15 +2,16 @@ package buaa.msasca.sca.core.application.service;
 
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
 import buaa.msasca.sca.core.port.in.CreateAnalysisRunUseCase;
-import buaa.msasca.sca.core.port.out.persistence.AnalysisRunPort;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 
 public class CreateAnalysisRunService implements CreateAnalysisRunUseCase {
-    private final AnalysisRunPort analysisRunPort;
+    private final AnalysisRunCommandPort analysisRunCommandPort;
     private final ProjectVersionSourceCachePort sourceCachePort;
 
-    public CreateAnalysisRunService(AnalysisRunPort analysisRunPort, ProjectVersionSourceCachePort sourceCachePort) {
-        this.analysisRunPort = analysisRunPort;
+    public CreateAnalysisRunService(AnalysisRunCommandPort analysisRunCommandPort, ProjectVersionSourceCachePort sourceCachePort) {
+        this.analysisRunCommandPort = analysisRunCommandPort;
         this.sourceCachePort = sourceCachePort;
     }
 
@@ -27,7 +28,10 @@ public class CreateAnalysisRunService implements CreateAnalysisRunUseCase {
             ));
         }
 
-        return analysisRunPort.create(
+        if (analysisRunCommandPort.existsActiveRun(command.projectVersionId())) {
+            return null;
+        }
+        return analysisRunCommandPort.createPending(
             command.projectVersionId(),
             command.configJson(),
             command.triggeredBy()

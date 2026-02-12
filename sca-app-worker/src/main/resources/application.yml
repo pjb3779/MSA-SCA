@@ -29,3 +29,5 @@ sca:
         - build-tool: GRADLE
           jdk-version: "*"
           image: gradle:8.7-jdk17
+    workspace:
+      base-path: C:/Users/beom/Desktop/buaa-msasca/.workspace
