@@ -17,6 +17,9 @@ spring:
       mode: never
 logging:
   level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.springframework.transaction: DEBUG
     org.springframework.boot.context.config: DEBUG
 sca:
   build:

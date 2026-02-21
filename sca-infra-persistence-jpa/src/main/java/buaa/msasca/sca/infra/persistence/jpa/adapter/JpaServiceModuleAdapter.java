@@ -19,7 +19,7 @@ public class JpaServiceModuleAdapter implements ServiceModulePort {
 
     @Override
     public List<ServiceModule> findByProjectVersionId(Long projectVersionId) {
-        return repo.findByProjectVersionId(projectVersionId).stream()
+        return repo.findAllByProjectVersionId(projectVersionId).stream()
             .map(mapper::toDomain)
             .toList();
     }

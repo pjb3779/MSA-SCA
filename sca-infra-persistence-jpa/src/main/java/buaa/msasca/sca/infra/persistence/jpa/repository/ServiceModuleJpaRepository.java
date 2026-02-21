@@ -1,5 +1,6 @@
 package buaa.msasca.sca.infra.persistence.jpa.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,5 +17,5 @@ public interface ServiceModuleJpaRepository extends JpaRepository<ServiceModuleE
      */
     Optional<ServiceModuleEntity> findByProjectVersion_IdAndName(Long projectVersionId, String name);
 
-    Optional<ServiceModuleEntity> findByProjectVersionId(Long projectVersionId);
+    List<ServiceModuleEntity> findAllByProjectVersionId(Long projectVersionId);
 }

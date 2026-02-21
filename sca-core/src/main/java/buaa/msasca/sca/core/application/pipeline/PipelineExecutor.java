@@ -19,13 +19,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import buaa.msasca.sca.core.domain.enums.ArtifactType;
-import buaa.msasca.sca.core.domain.enums.RunStatus;
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
 import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
 import buaa.msasca.sca.core.domain.model.ServiceModule;
 import buaa.msasca.sca.core.domain.model.ToolRun;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
-import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
@@ -40,7 +38,9 @@ import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class PipelineExecutor {
 
   private final AnalysisRunCommandPort analysisRunCommandPort;
@@ -134,13 +134,25 @@ public class PipelineExecutor {
 
     try {
       //모듈별 이미지 결정(파일 기반) + distinct 이미지 선-ensure
+      
+      //log.info("[PIPE] step4 prepareBuildPlans start. modules={}", modules.size());
       List<BuildPlan> buildPlans = prepareBuildPlans(modules, sourceRootPath);
+      // log.info("[PIPE] step4 prepareBuildPlans done. plans={}, images={}",
+      //     buildPlans.size(),
+      //     buildPlans.stream().map(BuildPlan::image).distinct().toList()
+      // );
+
+      //log.info("[PIPE] step5 ensureBuildImages start");
       ensureBuildImages(buildPlans, Duration.ofMinutes(20));
+      //log.info("[PIPE] step5 ensureBuildImages done");
+
+
       /////////////////////////////////////////////////////////////////////////////////////
       /// (현재) 단계 순서: BUILD -> CODEQL -> AGENT -> MSCAN
       /// 사용자가 제시한 최종 순서로 바꾸려면 아래 호출 순서만 재배치하면 됨.
       /////////////////////////////////////////////////////////////////////////////////////
 
+      //log.info("[PIPE] step6 runBuildStage start");
       runBuildStage(analysisRunId, buildPlans, sourceRootPath);
 
       // runCodeqlStage(analysisRunId, modules, sourceRootPath);
@@ -321,7 +333,7 @@ public class PipelineExecutor {
     }
 
     // 빌드 성공 시 JAR 자동 수집
-    collectAndStoreJars(toolRunId, module, sourceRootPath);
+    collectAndStoreJars(toolRunId, module, res.builtSourceRootPathOnHost());
   }
 
   /**
@@ -346,14 +358,12 @@ public class PipelineExecutor {
    * 빌드 결과로 생성된 JAR 파일들을 자동 수집하여 storage에 업로드하고,
    * analysis_artifact(ArtifactType.JAR)로 기록한다.
    *
-   * - Maven: <module>/target/*.jar
-   * - Gradle: <module>/build/libs/*.jar
-   * - 위 경로에서 못 찾으면: <module> 하위 제한 깊이로 fallback 탐색
+   * - Gradle: <module>/build/libs/*.jar (bootJar 우선, plain은 후보로 두되 primary 우선순위 낮춤)
+   * - Maven:  <module>/target/*.jar (original-*.jar 제외)
    *
-   * primary JAR 선정 규칙(대략):
-   * 1) sources/javadoc/tests/original/plain 제외
-   * 2) 크기가 큰 것 우선
-   * 3) 수정 시간이 최신인 것 우선
+   * fallback:
+   * - moduleDir 전체 walk 금지
+   * - build/libs, target 아래만 제한 깊이로 탐색
    *
    * @param toolRunId build tool_run ID (JAR artifact는 build tool_run에 귀속)
    * @param module 서비스 모듈
@@ -361,6 +371,11 @@ public class PipelineExecutor {
    */
   private void collectAndStoreJars(Long toolRunId, ServiceModule module, String sourceRootPath) {
     Path moduleDir = Path.of(normalizeDir(sourceRootPath, module.rootPath()));
+    
+    //로그찍기
+    storeTextArtifact(toolRunId, ArtifactType.OTHER, "jar-collect-root.log",
+    "collectRoot=" + sourceRootPath + ", moduleRootPath=" + module.rootPath() + ", moduleDir=" + moduleDir);
+
     if (!Files.exists(moduleDir) || !Files.isDirectory(moduleDir)) {
       storeTextArtifact(toolRunId, ArtifactType.OTHER, "jar-collect.log",
           "Module dir not found: " + moduleDir);
@@ -370,11 +385,13 @@ public class PipelineExecutor {
     List<Path> candidates = findJarCandidates(moduleDir, module);
     if (candidates.isEmpty()) {
       storeTextArtifact(toolRunId, ArtifactType.OTHER, "jar-collect.log",
-          "No jar found under moduleDir=" + moduleDir);
+          "No jar found. moduleDir=" + moduleDir
+              + ", buildTool=" + module.buildTool()
+              + ", searched=[build/libs,target]");
       return;
     }
 
-    Optional<Path> primary = choosePrimaryJar(candidates);
+    Optional<Path> primary = choosePrimaryJar(moduleDir, candidates);
 
     int uploaded = 0;
     for (Path jar : candidates) {
@@ -384,12 +401,18 @@ public class PipelineExecutor {
     }
 
     storeTextArtifact(toolRunId, ArtifactType.OTHER, "jar-collect.log",
-        "Collected jars=" + uploaded + ", primary=" + primary.map(Path::toString).orElse("none"));
+        "Collected jars=" + uploaded
+            + ", primary=" + primary.map(p -> moduleDir.relativize(p).toString()).orElse("none")
+            + ", moduleDir=" + moduleDir);
   }
 
   /**
    * 서비스 모듈 디렉토리에서 JAR 후보를 수집한다.
-   * 기본 산출 위치(target, build/libs)를 우선 탐색하고, 없으면 fallback으로 제한 깊이 탐색을 수행한다.
+   *
+   * 원칙:
+   * - moduleDir 전체 walk 금지
+   * - 산출 디렉토리(build/libs, target)만 탐색
+   * - Gradle wrapper, sources/javadoc/tests/original 등 제외
    *
    * @param moduleDir 모듈 루트 디렉토리
    * @param module 서비스 모듈
@@ -398,31 +421,22 @@ public class PipelineExecutor {
   private List<Path> findJarCandidates(Path moduleDir, ServiceModule module) {
     List<Path> result = new ArrayList<>();
 
-    // 1) 기본 디렉토리 우선 탐색
-    List<Path> preferredDirs = new ArrayList<>();
-    switch (module.buildTool()) {
-      case MAVEN -> preferredDirs.add(moduleDir.resolve("target"));
-      case GRADLE -> preferredDirs.add(moduleDir.resolve("build").resolve("libs"));
-      default -> {
-        preferredDirs.add(moduleDir.resolve("target"));
-        preferredDirs.add(moduleDir.resolve("build").resolve("libs"));
-      }
-    }
+    Path gradleLibs = moduleDir.resolve("build").resolve("libs");
+    Path mavenTarget = moduleDir.resolve("target");
 
-    for (Path dir : preferredDirs) {
-      if (Files.exists(dir) && Files.isDirectory(dir)) {
-        result.addAll(listJarsInDir(dir));
-      }
-    }
+    // 1) 우선: 산출 디렉토리 바로 아래
+    result.addAll(listJarsInDir(gradleLibs));
+    result.addAll(listJarsInDir(mavenTarget));
 
-    // 2) preferred에서 못 찾으면 fallback(깊이 제한)
+    // 2) fallback: 산출 디렉토리 하위만 제한 깊이로 탐색(모듈 전체는 금지)
     if (result.isEmpty()) {
-      result.addAll(findJarsByWalk(moduleDir, 5));
+      result.addAll(findJarsByWalk(gradleLibs, 3));
+      result.addAll(findJarsByWalk(mavenTarget, 3));
     }
 
-    // 3) 필터 적용
+    // 3) 필터 + 중복 제거
     return result.stream()
-        .filter(this::isValidJarCandidate)
+        .filter(p -> isValidJarCandidate(moduleDir, p))
         .distinct()
         .toList();
   }
@@ -434,6 +448,9 @@ public class PipelineExecutor {
    * @return jar 파일 리스트
    */
   private List<Path> listJarsInDir(Path dir) {
+    if (dir == null) return List.of();
+    if (!Files.exists(dir) || !Files.isDirectory(dir)) return List.of();
+
     try (Stream<Path> s = Files.list(dir)) {
       return s.filter(Files::isRegularFile)
           .filter(p -> p.getFileName().toString().endsWith(".jar"))
@@ -444,15 +461,19 @@ public class PipelineExecutor {
   }
 
   /**
-   * 모듈 디렉토리를 제한 깊이로 walk 하며 *.jar를 수집한다.
+   * 특정 디렉토리를 제한 깊이로 walk 하며 *.jar를 수집한다.
+   * (dir이 없으면 빈 리스트)
    *
-   * @param moduleDir 모듈 루트
+   * @param dir 탐색 시작 디렉토리
    * @param maxDepth 최대 깊이
    * @return jar 파일 리스트
    */
-  private List<Path> findJarsByWalk(Path moduleDir, int maxDepth) {
+  private List<Path> findJarsByWalk(Path dir, int maxDepth) {
+    if (dir == null) return List.of();
+    if (!Files.exists(dir) || !Files.isDirectory(dir)) return List.of();
+
     try (Stream<Path> s = Files.find(
-        moduleDir,
+        dir,
         maxDepth,
         (p, attr) -> attr.isRegularFile() && p.getFileName().toString().endsWith(".jar")
     )) {
@@ -464,43 +485,40 @@ public class PipelineExecutor {
 
   /**
    * JAR 후보 필터링 규칙.
-   * - sources/javadoc/tests 계열 제외
-   * - Spring Boot maven plugin의 original-*.jar 제외(보통 원본 jar)
-   * - Gradle의 *-plain.jar 제외(bootJar가 존재하는 경우가 많음)
    *
+   * 제외:
+   * - gradle/wrapper/gradle-wrapper.jar
+   * - sources/javadoc/tests
+   * - Maven spring-boot plugin original-*.jar
+   *
+   * @param moduleDir 모듈 루트(상대경로 판단용)
    * @param jarPath jar 파일 경로
    * @return 후보로 인정하면 true
    */
-  private boolean isValidJarCandidate(Path jarPath) {
+  private boolean isValidJarCandidate(Path moduleDir, Path jarPath) {
     String name = jarPath.getFileName().toString();
-
     if (!name.endsWith(".jar")) return false;
 
+    String rel = safeRelPath(moduleDir, jarPath);
+
+    //Gradle wrapper 제외
+    if (name.equals("gradle-wrapper.jar")) return false;
+    if (rel.startsWith("gradle/wrapper/")) return false;
+
+    // 빌드 산출물 경로 외에서 나온 jar는 배제 (안전장치)
+    // 우리가 탐색을 build/libs, target로 제한했지만, 혹시 모를 누수 방지
+    if (!(rel.startsWith("build/libs/") || rel.startsWith("target/"))) return false;
+
+    // 흔한 보조 jar 제외
     if (name.endsWith("-sources.jar")) return false;
     if (name.endsWith("-javadoc.jar")) return false;
     if (name.endsWith("-tests.jar")) return false;
     if (name.endsWith("-test.jar")) return false;
 
+    // Maven spring-boot plugin original 제외
     if (name.startsWith("original-")) return false;
-    if (name.endsWith("-plain.jar")) return false;
 
     return true;
-  }
-
-  /**
-   * 여러 후보 중 primary JAR 1개를 선정한다.
-   * 우선순위: (크기 DESC) -> (수정시간 DESC) -> (이름 ASC)
-   *
-   * @param candidates 후보 리스트(필터링 후)
-   * @return primary 후보
-   */
-  private Optional<Path> choosePrimaryJar(List<Path> candidates) {
-    return candidates.stream()
-        .max(Comparator
-            .comparingLong(this::safeSize)
-            .thenComparing(this::safeMtime, Comparator.naturalOrder())
-            .thenComparing(p -> p.getFileName().toString())
-        );
   }
 
   /**
@@ -518,6 +536,7 @@ public class PipelineExecutor {
       long size = Files.size(jarPath);
       String sha256 = computeSha256Hex(jarPath);
 
+      // storage key: toolRun + module + jars
       String key = "runs/toolRun/" + toolRunId + "/serviceModule-" + module.id() + "/jars/" + filename;
 
       try (InputStream in = Files.newInputStream(jarPath)) {
@@ -528,17 +547,77 @@ public class PipelineExecutor {
         meta.put("size", size);
         meta.put("sha256", sha256);
         meta.put("primary", primary);
+
         meta.put("serviceModuleId", module.id());
         meta.put("projectVersionId", module.projectVersionId());
-        meta.put("relativePath", moduleDir.relativize(jarPath).toString());
+
+        // 모듈 기준 상대경로(디버깅/추적용)
+        String rel = moduleDir.relativize(jarPath).toString().replace("\\", "/");
+        meta.put("relativePath", rel);
 
         artifactPort.create(toolRunId, ArtifactType.JAR, stored.uri(), meta);
       }
     } catch (Exception e) {
+      // 실패 로그를 artifact로 남김
       storeTextArtifact(toolRunId, ArtifactType.OTHER,
           "jar-collect-error-" + jarPath.getFileName() + ".log",
           "Failed to upload jar: " + jarPath + "\n" + e);
       throw new IllegalStateException("Failed to store jar artifact: " + jarPath, e);
+    }
+  }
+
+  /**
+   * 여러 후보 중 primary JAR 1개를 선정한다.
+   *
+   * 우선순위:
+   * 1) -plain.jar가 아닌 것 우선(Gradle bootJar 우선)
+   * 2) 크기 큰 것 우선
+   * 3) 수정시간 최신 우선
+   * 4) 파일명 사전순
+   *
+   * @param moduleDir 모듈 루트(상대경로 계산용)
+   * @param candidates 후보 리스트
+   * @return primary 후보
+   */
+  private Optional<Path> choosePrimaryJar(Path moduleDir, List<Path> candidates) {
+    return candidates.stream()
+        .max(Comparator
+            .comparingInt((Path p) -> primaryRank(p))              // 높은 점수 우선
+            .thenComparingLong(this::safeSize)                     // 큰 파일 우선
+            .thenComparing(this::safeMtime)                        // 최신 우선
+            .thenComparing(p -> safeRelPath(moduleDir, p))         // 안정적 tie-break
+        );
+  }
+
+  /**
+   * primary 선정용 랭크 점수를 계산한다.
+   * -plain.jar는 점수를 낮춰서 primary에서 밀리게 한다.
+   *
+   * @param p jar 경로
+   * @return 랭크 점수(클수록 우선)
+   */
+  private int primaryRank(Path p) {
+    String name = p.getFileName().toString();
+
+    // bootJar가 존재하면 보통 plain이 같이 생김 → plain은 낮은 우선순위
+    if (name.endsWith("-plain.jar")) return 0;
+
+    // 그 외 일반 jar는 우선
+    return 1;
+  }
+
+  /**
+   * moduleDir 기준 상대경로를 안전하게 계산한다.
+   *
+   * @param moduleDir 모듈 루트
+   * @param p 대상 경로
+   * @return 상대경로(슬래시 표준화)
+   */
+  private String safeRelPath(Path moduleDir, Path p) {
+    try {
+      return moduleDir.relativize(p).toString().replace("\\", "/");
+    } catch (Exception e) {
+      return p.toString().replace("\\", "/");
     }
   }
 
