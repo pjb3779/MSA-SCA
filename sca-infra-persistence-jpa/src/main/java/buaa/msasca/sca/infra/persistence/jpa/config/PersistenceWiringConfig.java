@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaAnalysisRunAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaArtifactAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionSourceCacheAdapter;
@@ -24,13 +25,18 @@ import buaa.msasca.sca.infra.persistence.jpa.repository.AgentRunDetailJpaReposit
 import buaa.msasca.sca.infra.persistence.jpa.repository.AnalysisArtifactJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.AnalysisRunJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.BuildRunDetailJpaRepository;
-import buaa.msasca.sca.infra.persistence.jpa.repository.CodeqlRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.MscanRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionSourceCacheJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ToolRunJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFindingJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFindingLocationJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFlowJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFlowStepJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlRunDetailJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlRunSummaryJpaRepository;
 
 /**
  * Persistence Wiring
@@ -175,4 +181,28 @@ public class PersistenceWiringConfig {
     ) {
         return new JpaArtifactAdapter(repo, toolRunRepo, mapper);
     }
+
+    // ---- codeQl ----
+    @Bean
+    public JpaCodeqlResultAdapter codeqlResultAdapter(
+        ToolRunJpaRepository toolRunRepo,
+        ServiceModuleJpaRepository serviceModuleRepo,
+        CodeqlRunDetailJpaRepository codeqlDetailRepo,
+        CodeqlRunSummaryJpaRepository summaryRepo,
+        CodeqlFindingJpaRepository findingRepo,
+        CodeqlFindingLocationJpaRepository locationRepo,
+        CodeqlFlowJpaRepository flowRepo,
+        CodeqlFlowStepJpaRepository stepRepo
+    ) {
+    return new JpaCodeqlResultAdapter(
+        toolRunRepo,
+        serviceModuleRepo,
+        codeqlDetailRepo,
+        summaryRepo,
+        findingRepo,
+        locationRepo,
+        flowRepo,
+        stepRepo
+    );
+  }
 }

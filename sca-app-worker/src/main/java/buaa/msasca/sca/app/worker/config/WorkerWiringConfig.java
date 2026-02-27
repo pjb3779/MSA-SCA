@@ -8,10 +8,13 @@ import org.springframework.context.annotation.Configuration;
 
 import buaa.msasca.sca.app.worker.build.FileBasedBuildImageResolver;
 import buaa.msasca.sca.app.worker.config.props.BuildImagesProperties;
+import buaa.msasca.sca.app.worker.config.props.ToolImageProperties;
 import buaa.msasca.sca.app.worker.tool.FileSystemServiceModuleScannerAdapter;
 import buaa.msasca.sca.core.application.pipeline.PipelineExecutor;
+import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
@@ -26,6 +29,7 @@ import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
+import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
 
 /**
  * Worker Wiring
@@ -33,7 +37,10 @@ import buaa.msasca.sca.core.port.out.tool.StoragePort;
  * - ToolPort(Runner/Storage/CodeQL/Agent/MScan)는 별도의 ToolWiringConfig에서 제공하는 것을 권장한다.
  */
 @Configuration
-@EnableConfigurationProperties(BuildImagesProperties.class)
+@EnableConfigurationProperties({
+    BuildImagesProperties.class,
+    ToolImageProperties.class
+})
 public class WorkerWiringConfig {
 
     /**
@@ -62,6 +69,17 @@ public class WorkerWiringConfig {
     public ServiceModuleScannerPort serviceModuleScannerPort() {
         return new FileSystemServiceModuleScannerAdapter();
     }
+
+    /**
+     * ✅ CodeQL SARIF ingest 서비스 빈 등록
+     * - 적재 정책/오케스트레이션은 core application service에 둔다.
+     * - 저장은 CodeqlResultPort(JPA 어댑터)가 담당.
+     */
+    @Bean
+    public CodeqlSarifIngestService codeqlSarifIngestService(CodeqlResultPort codeqlResultPort) {
+        return new CodeqlSarifIngestService(codeqlResultPort);
+    }
+
     /**
      * 
      * PipelineExecutor를 구성한다.
@@ -84,7 +102,9 @@ public class WorkerWiringConfig {
         AgentPort agentPort,
         MscanPort mscanPort,
         ServiceModuleScannerPort serviceModuleScannerPort,
-        ServiceModuleCommandPort serviceModuleCommandPort
+        ServiceModuleCommandPort serviceModuleCommandPort,
+        ToolImageConfig toolImageConfig,
+        CodeqlSarifIngestService codeqlSarifIngestService
     ) {
         return new PipelineExecutor(
             analysisRunCommandPort,
@@ -101,7 +121,9 @@ public class WorkerWiringConfig {
             agentPort,
             mscanPort,
             serviceModuleScannerPort,
-            serviceModuleCommandPort
+            serviceModuleCommandPort,
+            toolImageConfig,
+            codeqlSarifIngestService 
         );
     }
 }

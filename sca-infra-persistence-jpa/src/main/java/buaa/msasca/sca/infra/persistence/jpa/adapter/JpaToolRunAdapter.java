@@ -20,10 +20,10 @@ import buaa.msasca.sca.infra.persistence.jpa.mapper.ToolRunMapper;
 import buaa.msasca.sca.infra.persistence.jpa.repository.AgentRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.AnalysisRunJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.BuildRunDetailJpaRepository;
-import buaa.msasca.sca.infra.persistence.jpa.repository.CodeqlRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.MscanRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ToolRunJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlRunDetailJpaRepository;
 
 public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
 
@@ -152,5 +152,13 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
             .orElseThrow(() -> new IllegalArgumentException("tool_run not found: " + toolRunId));
         e.fail(errorMessage);
         return mapper.toDomain(e);
+    }
+
+    //포스트디비에선 널문자 거부
+    private String sanitizeForPostgres(String s) {
+        if (s == null) {
+            return null;
+        }
+        return s.replace("\u0000", "[NUL]");
     }
 }

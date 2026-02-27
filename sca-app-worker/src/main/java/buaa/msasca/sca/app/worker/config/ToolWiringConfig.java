@@ -4,12 +4,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import buaa.msasca.sca.app.worker.config.props.WorkerWorkspaceProperties;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
+import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
 import buaa.msasca.sca.infra.runner.build.DockerBuildPortAdapter;
 import buaa.msasca.sca.infra.storage.local.LocalStoragePortAdapter;
+import buaa.msasca.sca.tool.codeql.DockerCodeqlPortAdapter;
 
 @Configuration
 public class ToolWiringConfig {
@@ -34,5 +37,17 @@ public class ToolWiringConfig {
     @ConditionalOnMissingBean(StoragePort.class)
     public StoragePort storagePort() {
         return new LocalStoragePortAdapter();
+    }
+
+    @Bean
+    public CodeqlPort codeqlPort(
+        RunnerPort runnerPort,
+        WorkerWorkspaceProperties workspaceProps
+    ) {
+        String basePath = workspaceProps.basePath();
+        return new DockerCodeqlPortAdapter(
+            runnerPort,
+            basePath
+        );
     }
 }

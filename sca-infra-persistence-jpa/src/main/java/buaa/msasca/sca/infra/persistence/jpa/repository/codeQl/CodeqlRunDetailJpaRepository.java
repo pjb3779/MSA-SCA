@@ -1,4 +1,4 @@
-package buaa.msasca.sca.infra.persistence.jpa.repository;
+package buaa.msasca.sca.infra.persistence.jpa.repository.codeQl;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

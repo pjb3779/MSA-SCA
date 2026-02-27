@@ -18,6 +18,7 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
 import buaa.msasca.sca.core.domain.enums.ArtifactType;
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
 import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
@@ -38,6 +39,7 @@ import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
+import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -65,6 +67,9 @@ public class PipelineExecutor {
   private final ServiceModuleScannerPort serviceModuleScannerPort;
   private final ServiceModuleCommandPort serviceModuleCommandPort;
 
+  private final ToolImageConfig toolImageConfig;
+
+  private final CodeqlSarifIngestService codeqlSarifIngestService;
 
   private final ObjectMapper om = new ObjectMapper();
 
@@ -83,7 +88,9 @@ public class PipelineExecutor {
       AgentPort agentPort,
       MscanPort mscanPort,
       ServiceModuleScannerPort serviceModuleScannerPort,
-      ServiceModuleCommandPort serviceModuleCommandPort
+      ServiceModuleCommandPort serviceModuleCommandPort,
+      ToolImageConfig toolImageConfig,
+      CodeqlSarifIngestService codeqlSarifIngestService
   ) {
     this.analysisRunCommandPort = analysisRunCommandPort;
     this.serviceModulePort = serviceModulePort;
@@ -100,6 +107,8 @@ public class PipelineExecutor {
     this.mscanPort = mscanPort;
     this.serviceModuleScannerPort = serviceModuleScannerPort;
     this.serviceModuleCommandPort = serviceModuleCommandPort;
+    this.toolImageConfig = toolImageConfig;
+    this.codeqlSarifIngestService = codeqlSarifIngestService;
   }
 
   /**
@@ -134,18 +143,12 @@ public class PipelineExecutor {
 
     try {
       //모듈별 이미지 결정(파일 기반) + distinct 이미지 선-ensure
-      
-      //log.info("[PIPE] step4 prepareBuildPlans start. modules={}", modules.size());
       List<BuildPlan> buildPlans = prepareBuildPlans(modules, sourceRootPath);
-      // log.info("[PIPE] step4 prepareBuildPlans done. plans={}, images={}",
+
       //     buildPlans.size(),
       //     buildPlans.stream().map(BuildPlan::image).distinct().toList()
       // );
-
-      //log.info("[PIPE] step5 ensureBuildImages start");
       ensureBuildImages(buildPlans, Duration.ofMinutes(20));
-      //log.info("[PIPE] step5 ensureBuildImages done");
-
 
       /////////////////////////////////////////////////////////////////////////////////////
       /// (현재) 단계 순서: BUILD -> CODEQL -> AGENT -> MSCAN
@@ -155,7 +158,7 @@ public class PipelineExecutor {
       //log.info("[PIPE] step6 runBuildStage start");
       runBuildStage(analysisRunId, buildPlans, sourceRootPath);
 
-      // runCodeqlStage(analysisRunId, modules, sourceRootPath);
+      runCodeqlStage(analysisRunId, modules, sourceRootPath);
 
       // runAgentStage(analysisRunId, run.projectVersionId(), sourceRootPath);
 
@@ -192,19 +195,52 @@ public class PipelineExecutor {
   /**
    * tool_run 실행 공통 래퍼.
    *
+   * - RUNNING 으로 전이
+   * - body 실행
+   * - 성공 시 DONE
+   * - 실패 시 FAILED + error_message 기록
+   * - 추가: 실패 시 예외 메시지를 artifact 파일(tool-error.log)로도 남김
+   *
    * @param toolRunId tool_run ID
    * @param body 실행 로직
    */
   private void runTool(Long toolRunId, Runnable body) {
-    toolRunPort.markRunning(toolRunId);
-    try {
-      body.run();
-      toolRunPort.markDone(toolRunId);
-    } catch (Exception e) {
-      String msg = (e.getMessage() == null) ? e.toString() : e.getMessage();
-      toolRunPort.markFailed(toolRunId, msg);
-      throw e;
-    }
+      toolRunPort.markRunning(toolRunId);
+      try {
+          body.run();
+          toolRunPort.markDone(toolRunId);
+      } catch (Exception e) {
+          String msg = (e.getMessage() == null) ? e.toString() : e.getMessage();
+          msg = sanitizeDbText(msg);
+          
+          try {
+              storeTextArtifact(
+                  toolRunId,
+                  ArtifactType.OTHER,
+                  "tool-error.log",
+                  msg
+              );
+          } catch (Exception logEx) {
+              log.warn(
+                  "[PIPE] failed to store tool-error.log for toolRunId={}",
+                  toolRunId,
+                  logEx
+              );
+          }
+
+          toolRunPort.markFailed(toolRunId, msg);
+          throw e;
+      }
+  }
+
+  /**
+   * PostgreSQL text 컬럼에 넣기 안전하게 문자열을 정리한다.
+   * - 널 바이트(\u0000) 제거
+   */
+  private String sanitizeDbText(String s) {
+    if (s == null) return null;
+    // Postgres는 text/varchar에 \0 허용 안 함
+    return s.replace("\u0000", "");
   }
 
   /**
@@ -696,7 +732,7 @@ public class PipelineExecutor {
             buildCmd,
             codeqlDockerImageFor(m),
             "codeql-db",
-            Duration.ofMinutes(60)
+            Duration.ofMinutes(600) //반드시 일단 600 추후 수정
         ));
 
         storeLocalPathArtifact(tr.id(), ArtifactType.CODEQL_DB, "codeql-db", db.dbDirPathOnHost());
@@ -710,12 +746,22 @@ public class PipelineExecutor {
             db.dbDirPathOnHost(),
             List.of("codeql/java-queries"),
             "result.sarif",
-            Duration.ofMinutes(60)
+            Duration.ofMinutes(120)
         ));
 
-        storeLocalPathArtifact(tr.id(), ArtifactType.OTHER, "codeql-result-sarif", sarif.sarifPathOnHost());
+        Path sarifHostPath = Path.of(sarif.sarifPathOnHost());
+        String sarifStorageUri = storeFileArtifact(tr.id(), ArtifactType.OTHER, "result.sarif", sarifHostPath);
+
         storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stdout.log", sarif.stdout());
         storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stderr.log", sarif.stderr());
+
+        //ADDED: SARIF -> DB 적재 호출 (0건이면 CLEAN summary만 저장)
+        codeqlSarifIngestService.ingest(
+            tr.id(),
+            m.id(),
+            sarifHostPath.toString(),
+            sarifStorageUri
+        );
       });
     }
   }
@@ -727,11 +773,16 @@ public class PipelineExecutor {
    * @return build command 문자열
    */
   private String codeqlBuildCommandFor(ServiceModule m) {
+    String rel = shellEscapePath(m.rootPath());
+    String targetDir = (rel == null || rel.isBlank())
+        ? "/src"
+        : "/src/" + rel;
+
     return switch (m.buildTool()) {
-      case MAVEN -> "cd " + shellEscapePath(m.rootPath()) + " && mvn -DskipTests package";
-      case GRADLE -> "cd " + shellEscapePath(m.rootPath()) + " && ./gradlew build -x test";
-      case JAR -> "echo 'skip build for JAR'";
-      default -> "echo 'skip build for OTHER'";
+      case MAVEN  -> "cd " + targetDir + " && mvn -DskipTests package";
+      case GRADLE -> "cd " + targetDir + " && ./gradlew build -x test";
+      case JAR    -> "echo 'skip build for JAR'";
+      default     -> "echo 'skip build for OTHER'";
     };
   }
 
@@ -742,9 +793,20 @@ public class PipelineExecutor {
    * @return docker image name
    */
   private String codeqlDockerImageFor(ServiceModule m) {
-    return "YOUR_CODEQL_IMAGE";
-  }
+    String image = toolImageConfig.codeqlImage();
 
+    // 로그로 찍기
+    log.info("[PIPE] CodeQL image resolved. serviceModuleId={}, name={}, image={}",
+        m.id(), m.name(), image);
+
+    if (image == null || image.isBlank()) {
+        throw new IllegalStateException(
+            "CodeQL docker image not configured. " +
+            "Please set 'sca.tool.images.codeql' in application.yml"
+        );
+    }
+    return image;
+  }
   /**
    * 쉘 커맨드에서 경로로 사용할 문자열을 최소한으로 escape 한다.
    *
@@ -815,6 +877,25 @@ public class PipelineExecutor {
     meta.put("length", content.length());
 
     artifactPort.create(toolRunId, type, stored.uri(), meta);
+  }
+
+  private String storeFileArtifact(Long toolRunId, ArtifactType type, String filename, Path fileOnHost) {
+    try (InputStream in = Files.newInputStream(fileOnHost)) {
+      String key = "runs/toolRun/" + toolRunId + "/" + filename;
+      var stored = storagePort.put(key, in);
+
+      ObjectNode meta = om.createObjectNode();
+      meta.put("filename", filename);
+      meta.put("hostPath", fileOnHost.toString().replace("\\", "/"));
+      meta.put("size", Files.size(fileOnHost));
+
+      artifactPort.create(toolRunId, type, stored.uri(), meta);
+      return stored.uri();
+    } catch (Exception e) {
+      storeTextArtifact(toolRunId, ArtifactType.OTHER, "artifact-store-error.log",
+          "Failed to store file artifact: " + fileOnHost + "\n" + e);
+      throw new IllegalStateException("Failed to store file artifact: " + fileOnHost, e);
+    }
   }
 
   /**

@@ -22,6 +22,10 @@ logging:
     org.springframework.transaction: DEBUG
     org.springframework.boot.context.config: DEBUG
 sca:
+  worker:
+    workspace:
+      base-path: C:/Users/beom/Desktop/buaa-msasca/.workspace
+
   build:
     images:
       default-image: maven:3.9-eclipse-temurin-17
@@ -32,5 +36,9 @@ sca:
         - build-tool: GRADLE
           jdk-version: "*"
           image: gradle:8.7-jdk17
-    workspace:
-      base-path: C:/Users/beom/Desktop/buaa-msasca/.workspace
+
+  tool:
+    images:
+      codeql: "msasca/codeql-java:1.0.0"
+      # mscan: 
+      # agent: 
