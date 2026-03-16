@@ -4,15 +4,18 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import buaa.msasca.sca.app.worker.config.props.ToolMscanProperties;
 import buaa.msasca.sca.app.worker.config.props.WorkerWorkspaceProperties;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
 import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
+import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
 import buaa.msasca.sca.infra.runner.build.DockerBuildPortAdapter;
 import buaa.msasca.sca.infra.storage.local.LocalStoragePortAdapter;
 import buaa.msasca.sca.tool.codeql.DockerCodeqlPortAdapter;
+import buaa.msasca.sca.tool.mscan.DockerMscanPortAdapter;
 
 @Configuration
 public class ToolWiringConfig {
@@ -29,7 +32,7 @@ public class ToolWiringConfig {
 
     /**
      * 스토리지 Port 기본 구현을 등록
-     * 운영 스토리지 구현체가 생기면 해당 Bean으로 교체할것!!!!!
+     * todo: 운영 스토리지 구현체가 생기면 해당 Bean으로 교체할것!!!!!
      *
      * @return StoragePort
      */
@@ -49,5 +52,11 @@ public class ToolWiringConfig {
             runnerPort,
             basePath
         );
+    }
+
+    @Bean
+    public MscanPort mscanPort(RunnerPort runnerPort, ToolMscanProperties mscanProps) {
+        String mem = mscanProps.hasDockerMemoryLimit() ? mscanProps.dockerMemory() : null;
+        return new DockerMscanPortAdapter(runnerPort, mem);
     }
 }

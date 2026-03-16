@@ -6,15 +6,20 @@ import org.springframework.context.annotation.Configuration;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaAnalysisRunAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaArtifactAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlResultAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanGatewayYamlAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanResultAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanRunSummaryAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionSourceCacheAdapter;
-import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleCommandAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleCommandAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaToolRunAdapter;
 
 import buaa.msasca.sca.infra.persistence.jpa.mapper.AnalysisRunMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ArtifactMapper;
+import buaa.msasca.sca.infra.persistence.jpa.mapper.MscanGatewayYamlMapper;
+import buaa.msasca.sca.infra.persistence.jpa.mapper.MscanRunSummaryMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ProjectMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ProjectVersionViewMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ServiceModuleMapper;
@@ -31,6 +36,9 @@ import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionJpaReposit
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionSourceCacheJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ToolRunJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanGatewayYamlJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanRunSummaryJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanFindingJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFindingJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFindingLocationJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlFlowJpaRepository;
@@ -41,8 +49,8 @@ import buaa.msasca.sca.infra.persistence.jpa.repository.codeQl.CodeqlRunSummaryJ
 /**
  * Persistence Wiring
  * - JPA Repository + Mapper + Adapter 조립
- * - core Port 인터페이스는 Adapter가 직접 구현한다고 가정하고,
- *   "Port로 다시 감싼 빈"을 만들지 않는다(중복 빈 방지).
+ * - Adapter가 core Port/CommandPort를 직접 구현하는 전제에서,
+ *   별도 Port 래핑 빈을 만들지 않는다(중복 빈 방지).
  */
 @Configuration
 public class PersistenceWiringConfig {
@@ -50,52 +58,21 @@ public class PersistenceWiringConfig {
     // =========================================================
     // MAPPERS
     // =========================================================
-    @Bean
-    public ProjectMapper projectMapper() {
-        return new ProjectMapper();
-    }
-
-    @Bean
-    public ProjectVersionViewMapper projectVersionViewMapper() {
-        return new ProjectVersionViewMapper();
-    }
-
-    @Bean
-    public SourceCacheMapper sourceCacheMapper() {
-        return new SourceCacheMapper();
-    }
-
-    @Bean
-    public AnalysisRunMapper analysisRunMapper() {
-        return new AnalysisRunMapper();
-    }
-
-    @Bean
-    public ServiceModuleMapper serviceModuleMapper() {
-        return new ServiceModuleMapper();
-    }
-
-    @Bean
-    public ToolRunMapper toolRunMapper() {
-        return new ToolRunMapper();
-    }
-
-    @Bean
-    public ArtifactMapper artifactMapper() {
-        return new ArtifactMapper();
-    }
+    @Bean public ProjectMapper projectMapper() { return new ProjectMapper(); }
+    @Bean public ProjectVersionViewMapper projectVersionViewMapper() { return new ProjectVersionViewMapper(); }
+    @Bean public SourceCacheMapper sourceCacheMapper() { return new SourceCacheMapper(); }
+    @Bean public AnalysisRunMapper analysisRunMapper() { return new AnalysisRunMapper(); }
+    @Bean public ServiceModuleMapper serviceModuleMapper() { return new ServiceModuleMapper(); }
+    @Bean public ToolRunMapper toolRunMapper() { return new ToolRunMapper(); }
+    @Bean public ArtifactMapper artifactMapper() { return new ArtifactMapper(); }
 
     // =========================================================
-    // ADAPTER BEANS (한 구현체 = 한 빈)
-    // ※ Adapter가 Port/CommandPort를 직접 구현하면 이 빈 하나로 주입된다.
+    // ADAPTER BEANS
     // =========================================================
 
     // ---- Project ----
     @Bean
-    public JpaProjectAdapter projectAdapter(
-        ProjectJpaRepository repo,
-        ProjectMapper mapper
-    ) {
+    public JpaProjectAdapter projectAdapter(ProjectJpaRepository repo, ProjectMapper mapper) {
         return new JpaProjectAdapter(repo, mapper);
     }
 
@@ -131,10 +108,7 @@ public class PersistenceWiringConfig {
 
     // ---- ServiceModule (READ) ----
     @Bean
-    public JpaServiceModuleAdapter serviceModuleAdapter(
-        ServiceModuleJpaRepository repo,
-        ServiceModuleMapper mapper
-    ) {
+    public JpaServiceModuleAdapter serviceModuleAdapter(ServiceModuleJpaRepository repo, ServiceModuleMapper mapper) {
         return new JpaServiceModuleAdapter(repo, mapper);
     }
 
@@ -182,7 +156,7 @@ public class PersistenceWiringConfig {
         return new JpaArtifactAdapter(repo, toolRunRepo, mapper);
     }
 
-    // ---- codeQl ----
+    // ---- CodeQL Results ----
     @Bean
     public JpaCodeqlResultAdapter codeqlResultAdapter(
         ToolRunJpaRepository toolRunRepo,
@@ -194,15 +168,54 @@ public class PersistenceWiringConfig {
         CodeqlFlowJpaRepository flowRepo,
         CodeqlFlowStepJpaRepository stepRepo
     ) {
-    return new JpaCodeqlResultAdapter(
-        toolRunRepo,
-        serviceModuleRepo,
-        codeqlDetailRepo,
-        summaryRepo,
-        findingRepo,
-        locationRepo,
-        flowRepo,
-        stepRepo
-    );
-  }
+        return new JpaCodeqlResultAdapter(
+            toolRunRepo,
+            serviceModuleRepo,
+            codeqlDetailRepo,
+            summaryRepo,
+            findingRepo,
+            locationRepo,
+            flowRepo,
+            stepRepo
+        );
+    }
+
+    // ---- Mapper  ----
+    @Bean
+    public MscanGatewayYamlMapper mscanGatewayYamlMapper() {
+        return new MscanGatewayYamlMapper();
+    }
+
+    @Bean
+    public MscanRunSummaryMapper mscanRunSummaryMapper() {
+        return new MscanRunSummaryMapper();
+    }
+
+    // Adapter Bean
+    @Bean
+    public JpaMscanGatewayYamlAdapter mscanGatewayYamlAdapter(
+        MscanGatewayYamlJpaRepository repo,
+        ProjectVersionJpaRepository pvRepo,
+        MscanGatewayYamlMapper mapper
+    ) {
+    return new JpaMscanGatewayYamlAdapter(repo, pvRepo, mapper);
+    }
+
+    @Bean
+    public JpaMscanRunSummaryAdapter mscanRunSummaryAdapter(
+        MscanRunSummaryJpaRepository repo,
+        MscanRunDetailJpaRepository detailRepo,
+        MscanRunSummaryMapper mapper
+    ) {
+        return new JpaMscanRunSummaryAdapter(repo, detailRepo, mapper);
+    }
+
+    @Bean
+    public JpaMscanResultAdapter mscanResultAdapter(
+        MscanRunDetailJpaRepository runDetailRepo,
+        MscanFindingJpaRepository findingRepo
+    ) {
+        return new JpaMscanResultAdapter(runDetailRepo, findingRepo);
+    }
+
 }

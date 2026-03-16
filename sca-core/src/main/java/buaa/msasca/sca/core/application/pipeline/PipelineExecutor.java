@@ -10,9 +10,11 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,12 +22,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
 import buaa.msasca.sca.core.domain.enums.ArtifactType;
+import buaa.msasca.sca.core.domain.enums.GatewayYamlProvidedBy;
+import buaa.msasca.sca.core.domain.enums.GatewayYamlStatus;
+import buaa.msasca.sca.core.domain.enums.MscanSummaryStatus;
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
+import buaa.msasca.sca.core.domain.model.MscanGatewayYaml;
 import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
 import buaa.msasca.sca.core.domain.model.ServiceModule;
 import buaa.msasca.sca.core.domain.model.ToolRun;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanResultPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
@@ -40,6 +50,7 @@ import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
+import buaa.msasca.sca.core.port.out.tool.ToolLlmConfig;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -60,19 +71,29 @@ public class PipelineExecutor {
 
   private final DockerImagePort dockerImagePort;
 
-  private final CodeqlPort codeqlPort;
   private final AgentPort agentPort;
-  private final MscanPort mscanPort;
 
   private final ServiceModuleScannerPort serviceModuleScannerPort;
   private final ServiceModuleCommandPort serviceModuleCommandPort;
 
-  private final ToolImageConfig toolImageConfig;
-
+  private final CodeqlPort codeqlPort;
   private final CodeqlSarifIngestService codeqlSarifIngestService;
+
+  private final MscanPort mscanPort;
+  private final MscanGatewayYamlPort mscanGatewayYamlPort;
+  private final MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort;
+  private final MscanRunSummaryCommandPort mscanRunSummaryCommandPort;
+  private final MscanResultPort mscanResultPort;
+  private final ToolLlmConfig toolLlmConfig;
+  private final ToolImageConfig toolImageConfig;
 
   private final ObjectMapper om = new ObjectMapper();
 
+  //gateway얌 파일 / jar 폴더 / report 파일(컨테이너 실행 계약)
+  private static final String MSCAN_GATEWAY_REL_PATH = ".msasca/mscan/gateway.yml";
+  private static final String MSCAN_JAR_DIR_REL_PATH = ".msasca/mscan/jars";
+  private static final String MSCAN_REPORT_REL_PATH  = ".msasca/mscan/report.txt";
+  
   public PipelineExecutor(
       AnalysisRunCommandPort analysisRunCommandPort,
       ServiceModulePort serviceModulePort,
@@ -90,7 +111,12 @@ public class PipelineExecutor {
       ServiceModuleScannerPort serviceModuleScannerPort,
       ServiceModuleCommandPort serviceModuleCommandPort,
       ToolImageConfig toolImageConfig,
-      CodeqlSarifIngestService codeqlSarifIngestService
+      CodeqlSarifIngestService codeqlSarifIngestService,
+      MscanGatewayYamlPort mscanGatewayYamlPort,
+      MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort,
+      MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
+      MscanResultPort mscanResultPort,
+      ToolLlmConfig toolLlmConfig
   ) {
     this.analysisRunCommandPort = analysisRunCommandPort;
     this.serviceModulePort = serviceModulePort;
@@ -109,6 +135,11 @@ public class PipelineExecutor {
     this.serviceModuleCommandPort = serviceModuleCommandPort;
     this.toolImageConfig = toolImageConfig;
     this.codeqlSarifIngestService = codeqlSarifIngestService;
+    this.mscanGatewayYamlPort = mscanGatewayYamlPort;
+    this.mscanGatewayYamlCommandPort = mscanGatewayYamlCommandPort;
+    this.mscanRunSummaryCommandPort = mscanRunSummaryCommandPort;
+    this.mscanResultPort = mscanResultPort;
+    this.toolLlmConfig = toolLlmConfig;
   }
 
   /**
@@ -141,7 +172,24 @@ public class PipelineExecutor {
       throw new IllegalStateException("No service modules detected for projectVersionId=" + run.projectVersionId());
     }
 
+    // 테스트용
+    String mode = "";
+    if (run.configJson() != null) {
+      mode = run.configJson().path("pipeline").path("mode").asText("");
+    }
+    boolean mscanOnly = "MSCAN_ONLY".equalsIgnoreCase(mode);
+
+    //mscan 얌파일 체크
+    requireGatewayModuleAndYaml(run.projectVersionId(), sourceRootPath, modules);
+
     try {
+      log.info("[PIPE] start analysisRunId={}, projectVersionId={}", analysisRunId, run.projectVersionId());
+
+      if (mscanOnly) {
+        runMscanStage(run, sourceRootPath, modules);
+        return;
+      }
+
       //모듈별 이미지 결정(파일 기반) + distinct 이미지 선-ensure
       List<BuildPlan> buildPlans = prepareBuildPlans(modules, sourceRootPath);
 
@@ -155,16 +203,25 @@ public class PipelineExecutor {
       /// 사용자가 제시한 최종 순서로 바꾸려면 아래 호출 순서만 재배치하면 됨.
       /////////////////////////////////////////////////////////////////////////////////////
 
+      //mscan관련 전처리
+      //gateway.yml 요구 체크(게이트웨이 모듈이 있을 때만)
+      initMscanJarDir(sourceRootPath);
+
       //log.info("[PIPE] step6 runBuildStage start");
       runBuildStage(analysisRunId, buildPlans, sourceRootPath);
 
-      runCodeqlStage(analysisRunId, modules, sourceRootPath);
+      //runCodeqlStage(analysisRunId, modules, sourceRootPath);
 
       // runAgentStage(analysisRunId, run.projectVersionId(), sourceRootPath);
 
-      // runMscanStage(analysisRunId, run.projectVersionId(), sourceRootPath);
+      //런 내부의 값을 반드시 읽어야함
+      runMscanStage(run, sourceRootPath, modules);
+
+      log.info("[PIPE] finished OK analysisRunId={}", analysisRunId);
 
     } catch (Exception e) {
+      log.error("[PIPE] FAILED analysisRunId={} reason={}", analysisRunId, e.toString(), e);
+
       //RunPollingjob이 Mark fail 처리 
       throw e;
     }
@@ -212,6 +269,14 @@ public class PipelineExecutor {
       } catch (Exception e) {
           String msg = (e.getMessage() == null) ? e.toString() : e.getMessage();
           msg = sanitizeDbText(msg);
+          
+          String stack;
+          try (var sw = new java.io.StringWriter(); var pw = new java.io.PrintWriter(sw)) {
+              e.printStackTrace(pw);
+              stack = sw.toString();
+          } catch (Exception ignored) {
+              stack = "[stacktrace unavailable]";
+          }
           
           try {
               storeTextArtifact(
@@ -368,8 +433,78 @@ public class PipelineExecutor {
       throw new IllegalStateException("Build failed: exitCode=" + res.exitCode());
     }
 
-    // 빌드 성공 시 JAR 자동 수집
-    collectAndStoreJars(toolRunId, module, res.builtSourceRootPathOnHost());
+    String builtRoot = res.builtSourceRootPathOnHost();
+    storeTextArtifact(toolRunId, ArtifactType.OTHER, "build-workroot.log",
+        "builtSourceRootPathOnHost=" + builtRoot + ", originalSourceRootPath=" + sourceRootPath);
+
+    String jarCollectRoot = (builtRoot == null || builtRoot.isBlank()) ? sourceRootPath : builtRoot;
+
+    List<Path> builtJars = collectAndStoreJars(toolRunId, module, jarCollectRoot);
+
+    stageMscanJars(sourceRootPath, module, builtJars);
+  }
+
+  private void stageMscanJars(String sourceRootPath, ServiceModule module, List<Path> jars) {
+    try {
+      if (jars == null || jars.isEmpty()) return;
+
+      Path jarDir = Path.of(sourceRootPath).resolve(MSCAN_JAR_DIR_REL_PATH);
+      Files.createDirectories(jarDir);
+
+      for (Path jar : jars) {
+        // 파일명 충돌 방지: serviceModuleId prefix
+        String outName = "sm-" + module.id() + "-" + jar.getFileName().toString();
+        Files.copy(jar, jarDir.resolve(outName), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+      }
+    } catch (Exception e) {
+      // staging 실패는 mscan 실패로 이어지므로 예외로 올리는 게 낫다
+      throw new IllegalStateException("Failed to stage mscan jars for serviceModuleId=" + module.id(), e);
+    }
+  }
+
+  private void collectMscanJarsFromStorage(String sourceRootPath, List<ServiceModule> modules) {
+    try {
+      Path jarDir = Path.of(sourceRootPath).resolve(MSCAN_JAR_DIR_REL_PATH);
+      Files.createDirectories(jarDir);
+
+      int copied = 0;
+
+      // dev/local: storage의 runs/toolRun 아래에서 serviceModule-{id}/jars/*.jar 찾아 복사
+      List<StoragePort.StoredObject> all = storagePort.list("runs/toolRun/");
+      for (StoragePort.StoredObject obj : all) {
+        String key = obj.key().replace("\\", "/");
+        if (!key.endsWith(".jar")) continue;
+        if (!key.contains("/jars/")) continue;
+
+        boolean matchesAny = modules.stream()
+            .anyMatch(m -> key.contains("serviceModule-" + m.id() + "/jars/"));
+        if (!matchesAny) continue;
+
+        String filename = Path.of(key).getFileName().toString();
+
+        // 충돌 방지: key를 일부 포함
+        String safeKey = key.replace("/", "_");
+        if (safeKey.length() > 140) safeKey = safeKey.substring(safeKey.length() - 140);
+
+        Path out = jarDir.resolve(safeKey + "-" + filename);
+
+        try (InputStream in = storagePort.open(obj.uri())) {
+          Files.copy(in, out, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        copied++;
+      }
+
+      log.info("[PIPE] collectedFromStorage={}, jarDir={}", copied, jarDir);
+
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to collect mscan jars from storage", e);
+    }
+  }
+  // toolRunId가 없을 때도 storeTextArtifact를 쓰고 싶으면 별도 로깅 방식이 필요하지만,
+  // 여기서는 간단히 analysisRunId를 대신 쓰지 말고 그냥 예외 메시지만 올리거나,
+  // 별도 logger로 충분합니다. (storeTextArtifact는 toolRunId 필수라면 제거)
+  private Long nullSafeToolRunIdForLog(Long analysisRunId) {
+    return 0L; // 필요하면 toolRunId 기반으로만 로깅하도록 수정
   }
 
   /**
@@ -405,7 +540,7 @@ public class PipelineExecutor {
    * @param module 서비스 모듈
    * @param sourceRootPath 소스 루트 경로
    */
-  private void collectAndStoreJars(Long toolRunId, ServiceModule module, String sourceRootPath) {
+  private List<Path> collectAndStoreJars(Long toolRunId, ServiceModule module, String sourceRootPath) {
     Path moduleDir = Path.of(normalizeDir(sourceRootPath, module.rootPath()));
     
     //로그찍기
@@ -415,7 +550,7 @@ public class PipelineExecutor {
     if (!Files.exists(moduleDir) || !Files.isDirectory(moduleDir)) {
       storeTextArtifact(toolRunId, ArtifactType.OTHER, "jar-collect.log",
           "Module dir not found: " + moduleDir);
-      return;
+      return List.of();
     }
 
     List<Path> candidates = findJarCandidates(moduleDir, module);
@@ -424,7 +559,7 @@ public class PipelineExecutor {
           "No jar found. moduleDir=" + moduleDir
               + ", buildTool=" + module.buildTool()
               + ", searched=[build/libs,target]");
-      return;
+      return List.of();
     }
 
     Optional<Path> primary = choosePrimaryJar(moduleDir, candidates);
@@ -440,6 +575,9 @@ public class PipelineExecutor {
         "Collected jars=" + uploaded
             + ", primary=" + primary.map(p -> moduleDir.relativize(p).toString()).orElse("none")
             + ", moduleDir=" + moduleDir);
+
+    // MScan staging에서 재사용할 “로컬 jar 경로 리스트” 반환
+    return List.copyOf(candidates);
   }
 
   /**
@@ -841,6 +979,34 @@ public class PipelineExecutor {
   /// MSCAN 메서드
   /////////////////////////////////////////////////////////////////////////////////////
 
+  private void initMscanJarDir(String sourceRootPath) {
+    try {
+      Path jarDir = Path.of(sourceRootPath).resolve(MSCAN_JAR_DIR_REL_PATH);
+      Files.createDirectories(jarDir);
+
+      try (Stream<Path> s = Files.list(jarDir)) {
+        s.filter(Files::isRegularFile).forEach(p -> {
+          try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+        });
+      }
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to init mscan jar dir", e);
+    }
+  }
+
+  private void ensureMscanJarDirHasJars(Path jarDir) {
+    try (Stream<Path> s = Files.list(jarDir)) {
+      boolean hasJar = s.anyMatch(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".jar"));
+      if (!hasJar) {
+        throw new IllegalStateException("MScan jar dir is empty: " + jarDir + " (no *.jar staged)");
+      }
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to inspect mscan jar dir: " + jarDir, e);
+    }
+  }
+
   /**
    * MSCAN 단계를 실행한다(프로젝트 버전 단위 1회).
    *
@@ -848,12 +1014,357 @@ public class PipelineExecutor {
    * @param projectVersionId project_version ID
    * @param sourceRootPath 소스 루트 경로
    */
-  private void runMscanStage(Long analysisRunId, Long projectVersionId, String sourceRootPath) {
-    ToolRun tr = toolRunCommandPort.createMscanRun(analysisRunId, "mscan", mscanConfigJson());
+  private void runMscanStage(AnalysisRun run, String sourceRootPath, List<ServiceModule> modules) {
+
+    //  1) tool_run을 먼저 만든다 (이후 어떤 실패도 tool_run FAILED로 남게 됨)
+    ToolRun tr = toolRunCommandPort.createMscanRun(run.id(), "mscan", mscanConfigJson());
+
     runTool(tr.id(), () -> {
-      mscanPort.runGlobalAnalysis(tr.id(), projectVersionId, sourceRootPath);
-      storeTextArtifact(tr.id(), ArtifactType.MSCAN_REPORT, "mscan-report.txt", "mscan-report placeholder");
+
+      // 2) jars dir 준비 + 비어있으면 storage에서 끌어모으기
+      Path jarDir = Path.of(sourceRootPath).resolve(MSCAN_JAR_DIR_REL_PATH);
+      if (!Files.isDirectory(jarDir)) {
+        try {
+          Files.createDirectories(jarDir);
+        } catch (java.io.IOException e) {
+          throw new IllegalStateException("Failed to create mscan jar dir: " + jarDir, e);
+        }
+      }
+
+      // jarDir이 비어있으면(또는 jar가 없으면) storage에서 모아오기
+      if (!hasAnyJar(jarDir)) {
+        collectMscanJarsFromStorage(sourceRootPath, modules);
+      }
+
+      // 최종 확인: 그래도 없으면 실패(이제는 MSCAN tool_run에 실패 기록이 남음)
+      ensureMscanJarDirHasJars(jarDir);
+
+      // 3) config_json에서 mscan 설정 읽기 (여기서 실패해도 MSCAN tool_run에 남음)
+      var cfg = run.configJson();
+      String name = (cfg == null) ? null : cfg.path("mscan").path("name").asText(null);
+      String keywords = (cfg == null) ? null : cfg.path("mscan").path("classpathKeywords").asText(null);
+      String jvmArgs = (cfg == null) ? null : cfg.path("mscan").path("jvmArgs").asText(null);
+      boolean reuse = (cfg != null) && cfg.path("mscan").path("reuse").asBoolean(false);
+      String optionsRel = (cfg == null) ? null : cfg.path("mscan").path("optionsFileRelPath").asText(null);
+
+      final String optionsFilePathOnHost =
+          (optionsRel == null || optionsRel.isBlank())
+              ? null
+              : Path.of(sourceRootPath).resolve(optionsRel).toString();
+
+      if (name == null || name.isBlank()) {
+        throw new IllegalStateException("Missing analysis_run.config_json: mscan.name");
+      }
+      if (keywords == null || keywords.isBlank()) {
+        throw new IllegalStateException("Missing analysis_run.config_json: mscan.classpathKeywords");
+      }
+
+      // 4) gateway.yml 경로(캐시에 재물질화되어 있어야 함)
+      String gatewayOnHost = Path.of(sourceRootPath).resolve(MSCAN_GATEWAY_REL_PATH).toString();
+      if (!Files.exists(Path.of(gatewayOnHost))) {
+        throw new IllegalStateException("gateway.yml not found in cache: " + gatewayOnHost);
+      }
+
+      // 5) 이미지/키 확인
+      String mscanImage = toolImageConfig.mscanImage();
+      if (mscanImage == null || mscanImage.isBlank()) {
+        throw new IllegalStateException("MScan docker image not configured. Set sca.tool.images.mscan");
+      }
+
+      String llmApiKey = toolLlmConfig.openAiApiKey();
+      String baseUrl    = toolLlmConfig.openAiBaseUrl();
+      String model      = toolLlmConfig.openAiModel();
+
+      if (llmApiKey == null || llmApiKey.isBlank()) {
+        throw new IllegalStateException("OPENAI API key not configured. Set sca.tool.llm.openai-api-key");
+      }
+
+      dockerImagePort.ensurePresent(mscanImage, Duration.ofMinutes(20));
+      
+      // 6) 실제 mscan 실행
+      var res = mscanPort.runGlobalAnalysis(new MscanPort.RunRequest(
+          tr.id(),
+          run.projectVersionId(),
+          name,
+          sourceRootPath,
+          gatewayOnHost,
+          jarDir.toString(),
+          keywords,
+          optionsFilePathOnHost,
+          reuse,
+          jvmArgs,
+          mscanImage,
+          llmApiKey,
+          baseUrl,
+          model,
+          Duration.ofMinutes(120)
+      ));
+
+      // stdout/stderr 저장
+      storeTextArtifact(tr.id(), ArtifactType.OTHER, "mscan-stdout.log", res.stdout());
+      storeTextArtifact(tr.id(), ArtifactType.OTHER, "mscan-stderr.log", res.stderr());
+
+      // 7) report 업로드 + artifact 등록
+      Path report = Path.of(res.reportPathOnHost());
+      String reportSha = computeSha256Hex(report);
+
+      String reportKey = "runs/toolRun/" + tr.id() + "/mscan/report.txt";
+      try (InputStream in = Files.newInputStream(report)) {
+        var stored = storagePort.put(reportKey, in);
+
+        artifactPort.create(
+            tr.id(),
+            ArtifactType.MSCAN_REPORT,
+            stored.uri(),
+            om.createObjectNode()
+                .put("filename", "report.txt")
+                .put("sha256", reportSha)
+        );
+
+        int count = countNonEmptyLines(report);
+
+        // 개별 finding 파싱 및 저장
+        List<MscanResultPort.MscanFindingIngest> findings = parseMscanReport(report);
+        mscanResultPort.replaceAll(tr.id(), findings);
+
+        var status = (count == 0)
+            ? MscanSummaryStatus.CLEAN
+            : MscanSummaryStatus.HAS_RESULTS;
+
+        mscanRunSummaryCommandPort.upsert(
+            tr.id(),
+            status,
+            count,
+            stored.uri(),
+            reportSha,
+            java.time.Instant.now()
+        );
+
+      } catch (Exception e) {
+        mscanRunSummaryCommandPort.upsert(
+            tr.id(),
+            MscanSummaryStatus.INGEST_FAILED,
+            0,
+            null,
+            null,
+            java.time.Instant.now()
+        );
+        throw new IllegalStateException("MScan ingest failed: " + e.getMessage(), e);
+      }
     });
+  }
+
+  private boolean hasAnyJar(Path jarDir) {
+    try (var s = Files.list(jarDir)) {
+      return s.anyMatch(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".jar"));
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private int countNonEmptyLines(Path p) {
+    try (Stream<String> s = Files.lines(p, StandardCharsets.UTF_8)) {
+      return (int) s.filter(line -> line != null && !line.isBlank()).count();
+    } catch (Exception e) {
+      // 파싱 자체 실패는 ingest 실패로 보는 게 맞아서 예외로 올림
+      throw new IllegalStateException("Failed to read mscan report: " + p, e);
+    }
+  }
+
+  private List<MscanResultPort.MscanFindingIngest> parseMscanReport(Path reportPath) {
+    try (Stream<String> lines = Files.lines(reportPath, StandardCharsets.UTF_8)) {
+      List<MscanResultPort.MscanFindingIngest> result = new ArrayList<>();
+      lines.forEach(raw -> {
+        if (raw == null) {
+          return;
+        }
+        String line = raw.trim();
+        if (line.isBlank()) {
+          return;
+        }
+
+        // 1) flowIndex (맨 앞 숫자)
+        int spaceIdx = line.indexOf(' ');
+        if (spaceIdx <= 0) {
+          return;
+        }
+        int flowIndex;
+        try {
+          flowIndex = Integer.parseInt(line.substring(0, spaceIdx));
+        } catch (NumberFormatException e) {
+          return;
+        }
+
+        String rest = line.substring(spaceIdx + 1).trim();
+
+        // 2) VUL_ID 추출
+        String vulId = "UNKNOWN";
+        String flowText = rest;
+        int vulPos = rest.indexOf("VUL_ID:");
+        if (vulPos >= 0) {
+          String after = rest.substring(vulPos + "VUL_ID:".length());
+          vulId = after.replaceAll("[}\\s]+$", "").trim();
+          flowText = rest.substring(0, vulPos).trim();
+        }
+
+        // 3) source / sink signature 대충 분리
+        String sourceSig = flowText;
+        String sinkSig = flowText;
+        int tfPos = flowText.indexOf("TaintFlow{");
+        if (tfPos >= 0) {
+          int arrowPos = flowText.indexOf("->", tfPos);
+          String inner = flowText.substring(tfPos + "TaintFlow{".length());
+          int closeBrace = inner.lastIndexOf('}');
+          if (closeBrace > 0) {
+            inner = inner.substring(0, closeBrace);
+          }
+          int arrowInInner = inner.indexOf("->");
+          if (arrowInInner > 0) {
+            sourceSig = inner.substring(0, arrowInInner).trim();
+            sinkSig = inner.substring(arrowInInner + 2).trim();
+          } else {
+            sourceSig = inner.trim();
+          }
+        }
+
+        result.add(new MscanResultPort.MscanFindingIngest(
+            flowIndex,
+            sourceSig,
+            sinkSig,
+            vulId,
+            line
+        ));
+      });
+      return result;
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to parse mscan report for findings: " + reportPath, e);
+    }
+  }
+
+  private Path prepareMscanJarDir(String sourceRootPath, List<ServiceModule> modules) {
+    try {
+      Path jarDir = Path.of(sourceRootPath).resolve(MSCAN_JAR_DIR_REL_PATH);
+      Files.createDirectories(jarDir);
+
+      // 기존에 이미 구현해둔 jar 후보 수집 로직 재사용
+      for (ServiceModule m : modules) {
+        Path moduleDir = Path.of(normalizeDir(sourceRootPath, m.rootPath()));
+        List<Path> candidates = findJarCandidates(moduleDir, m);
+
+        for (Path jar : candidates) {
+          // 파일명 충돌 시 moduleId prefix로 방지
+          String outName = "sm-" + m.id() + "-" + jar.getFileName().toString();
+          Files.copy(jar, jarDir.resolve(outName), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+      }
+
+      return jarDir;
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to prepare mscan jar dir", e);
+    }
+  }
+
+  /** jarDir이 sourceRoot 하위인지 보장(컨테이너 mount를 sourceRoot 하나만 할 거라서) */
+  private void assertUnderSourceRoot(String sourceRootPath, Path p) {
+    Path root = Path.of(sourceRootPath).toAbsolutePath().normalize();
+    Path abs  = p.toAbsolutePath().normalize();
+    if (!abs.startsWith(root)) {
+      throw new IllegalStateException("Path must be under sourceRoot. path=" + abs + ", root=" + root);
+    }
+  }
+
+  /**
+   * report.json의 결과 개수 파싱.
+   * (실제 MScan 리포트 스키마에 맞춰 수정)
+   */
+  private int tryCountMscanFindings(Path reportJson) {
+    try {
+      var node = om.readTree(Files.readString(reportJson));
+      // 예: { "flows": [ ... ] } 형태 가정
+      if (node.has("flows") && node.get("flows").isArray()) {
+        return node.get("flows").size();
+      }
+      // 혹은 { "resultCount": 0 }
+      if (node.has("resultCount")) {
+        return node.get("resultCount").asInt(0);
+      }
+      return 0;
+    } catch (Exception e) {
+      // 파싱 실패는 ingest 실패로 처리하는 게 정석이므로 예외 던짐
+      throw new IllegalStateException("Invalid mscan report format: " + reportJson, e);
+    }
+  }
+  
+  /**
+   * Gateway 모듈이 존재하면 gateway.yml이 READY여야 한다.
+   * READY가 아니면:
+   *  1) 소스(cache)에서 gateway application.yml(yaml) 자동 탐색 시도
+   *  2) 찾으면 Storage에 업로드 + DB에 gateway.yml READY로 등록(upsertReady)
+   *  3) 그래도 못 찾으면 DB에 MISSING ensure 후 실패(사용자 업로드 요구)
+   */
+  private void requireGatewayModuleAndYaml(Long projectVersionId, String sourceRootPath, List<ServiceModule> modules) {
+    Path cachePath = Path.of(sourceRootPath)
+        .resolve(MSCAN_GATEWAY_REL_PATH)
+        .toAbsolutePath()
+        .normalize();
+
+    // 0) 캐시에 이미 있으면 OK
+    if (Files.exists(cachePath) && Files.isRegularFile(cachePath)) {
+      return;
+    }
+
+    // 1) DB에 READY가 있으면 storage -> cache 재물질화
+    var opt = mscanGatewayYamlPort.findByProjectVersionId(projectVersionId);
+    if (opt.isPresent() && opt.get().status() == GatewayYamlStatus.READY) {
+      materializeGatewayYamlToCache(opt.get(), sourceRootPath);
+
+      if (Files.exists(cachePath) && Files.isRegularFile(cachePath)) {
+        return;
+      }
+      throw new IllegalStateException("gateway.yml READY but not materialized: " + cachePath);
+    }
+
+    // 2) auto-detect는 is_gateway=true 모듈에서만 (오탐 방지)
+    List<ServiceModule> gatewayModules = modules.stream().filter(ServiceModule::isGateway).toList();
+    if (gatewayModules.isEmpty()) {
+      mscanGatewayYamlCommandPort.ensureMissing(projectVersionId, MSCAN_GATEWAY_REL_PATH);
+      throw new IllegalStateException(
+          "MScan requires gateway.yml but gateway module was not detected (is_gateway=false for all). " +
+          "Please upload/generate gateway.yml for projectVersionId=" + projectVersionId
+      );
+    }
+
+    // 3) 여기까지 못 찾았으면 업로드 요구
+    mscanGatewayYamlCommandPort.ensureMissing(projectVersionId, MSCAN_GATEWAY_REL_PATH);
+
+    throw new IllegalStateException(
+        "MScan requires gateway.yml but it is missing. " +
+        "No READY record and auto-detect failed. " +
+        "Please upload gateway.yml for projectVersionId=" + projectVersionId
+    );
+  }
+
+  /** storage에 저장된 gateway.yml을 cache_rel_path 위치로 복사 */
+  private void materializeGatewayYamlToCache(MscanGatewayYaml yaml, String sourceRootPath) {
+    if (yaml.storagePath() == null || yaml.storagePath().isBlank()) {
+        throw new IllegalStateException("gateway yaml storagePath is empty");
+    }
+
+    try {
+        Path target = Path.of(sourceRootPath).resolve(yaml.cacheRelPath()).normalize();
+        Files.createDirectories(target.getParent());
+
+        try (InputStream in = storagePort.open(yaml.storagePath())) {
+            Files.copy(in, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        if (!Files.exists(target) || !Files.isRegularFile(target)) {
+            throw new IllegalStateException("gateway.yml was not created at: " + target);
+        }
+
+    } catch (Exception e) {
+        throw new IllegalStateException("Failed to materialize gateway.yml into source cache", e);
+    }
   }
 
   /////////////////////////////////////////////////////////////////////////////////////

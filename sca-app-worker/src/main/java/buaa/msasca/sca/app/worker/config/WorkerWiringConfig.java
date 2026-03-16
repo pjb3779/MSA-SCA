@@ -9,12 +9,17 @@ import org.springframework.context.annotation.Configuration;
 import buaa.msasca.sca.app.worker.build.FileBasedBuildImageResolver;
 import buaa.msasca.sca.app.worker.config.props.BuildImagesProperties;
 import buaa.msasca.sca.app.worker.config.props.ToolImageProperties;
+import buaa.msasca.sca.app.worker.config.props.ToolLlmProperties;
+import buaa.msasca.sca.app.worker.config.props.ToolMscanProperties;
 import buaa.msasca.sca.app.worker.tool.FileSystemServiceModuleScannerAdapter;
 import buaa.msasca.sca.core.application.pipeline.PipelineExecutor;
 import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
@@ -30,6 +35,7 @@ import buaa.msasca.sca.core.port.out.tool.MscanPort;
 import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
+import buaa.msasca.sca.core.port.out.tool.ToolLlmConfig;
 
 /**
  * Worker Wiring
@@ -39,7 +45,10 @@ import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
 @Configuration
 @EnableConfigurationProperties({
     BuildImagesProperties.class,
-    ToolImageProperties.class
+    ToolImageProperties.class,
+    ToolImageProperties.class,
+    ToolLlmProperties.class,
+    ToolMscanProperties.class
 })
 public class WorkerWiringConfig {
 
@@ -71,7 +80,7 @@ public class WorkerWiringConfig {
     }
 
     /**
-     * ✅ CodeQL SARIF ingest 서비스 빈 등록
+     * CodeQL SARIF ingest 서비스 빈 등록
      * - 적재 정책/오케스트레이션은 core application service에 둔다.
      * - 저장은 CodeqlResultPort(JPA 어댑터)가 담당.
      */
@@ -104,7 +113,11 @@ public class WorkerWiringConfig {
         ServiceModuleScannerPort serviceModuleScannerPort,
         ServiceModuleCommandPort serviceModuleCommandPort,
         ToolImageConfig toolImageConfig,
-        CodeqlSarifIngestService codeqlSarifIngestService
+        CodeqlSarifIngestService codeqlSarifIngestService,
+        MscanGatewayYamlPort mscanGatewayYamlPort,
+        MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort,
+        MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
+        ToolLlmConfig toolLlmConfig
     ) {
         return new PipelineExecutor(
             analysisRunCommandPort,
@@ -123,7 +136,11 @@ public class WorkerWiringConfig {
             serviceModuleScannerPort,
             serviceModuleCommandPort,
             toolImageConfig,
-            codeqlSarifIngestService 
+            codeqlSarifIngestService,
+            mscanGatewayYamlPort,
+            mscanGatewayYamlCommandPort,
+            mscanRunSummaryCommandPort,
+            toolLlmConfig
         );
     }
 }

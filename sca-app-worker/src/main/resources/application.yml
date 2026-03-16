@@ -40,5 +40,14 @@ sca:
   tool:
     images:
       codeql: "msasca/codeql-java:1.0.0"
-      # mscan: 
+      mscan: "msasca-mscan:dev"
+    mscan:
+      # Mscan Docker 컨테이너 메모리 제한 (16GB RAM 노트북에서 OOM 방지, 6g 권장)
+      docker-memory: 8g
       # agent: 
+    llm:
+      # 지금 api-key는 5달러가 한도 원래는 시크릿.얌으로 해야하지만 개발중이니까 그냥 구현
+      # TODO(ops): 운영에서는 Secret YAML/Secret Store로 교체할 것
+      openai-api-key: "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"
+      openai-base-url: "https://openrouter.ai/api/v1"
+      openai-model: "deepseek/deepseek-r1"
