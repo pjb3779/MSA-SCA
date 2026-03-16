@@ -37,22 +37,19 @@ public class ProjectVersionController {
 
     public record CreateFromGitResponse(
         Long projectVersionId,
-        String sourceRootPath
+        String sourceRootPath,
+        Long analysisRunId,
+        String autoRunError
     ) {}
 
     public record CreateFromZipResponse(
         Long projectVersionId,
         String sourceRootPath,
-        String uploadZipPath
+        String uploadZipPath,
+        Long analysisRunId,
+        String autoRunError
     ) {}
 
-    /**
-     * Git 기반 project_version 생성 + clone + source_cache 생성
-     *
-     * @param projectId project PK
-     * @param req 요청 DTO
-     * @return 생성 결과
-     */
     @PostMapping("/{projectId}/versions/git")
     public ResponseEntity<CreateFromGitResponse> createFromGit(
         @PathVariable @NotNull Long projectId,
@@ -68,23 +65,14 @@ public class ProjectVersionController {
             expiresAt
         ));
 
-        return ResponseEntity.ok(new CreateFromGitResponse(res.projectVersionId(), res.sourceRootPath()));
+        return ResponseEntity.ok(new CreateFromGitResponse(
+            res.projectVersionId(),
+            res.sourceRootPath(),
+            res.analysisRunId(),
+            res.autoRunError()
+        ));
     }
 
-    /**
-     * ZIP 업로드 기반 project_version 생성 + unzip + source_cache 생성
-     *
-     * form-data:
-     * - versionLabel: string
-     * - file: multipart(zip)
-     * - expiresAt: (optional) ISO-8601 instant string
-     *
-     * @param projectId project PK
-     * @param versionLabel version label
-     * @param file zip file
-     * @param expiresAt expiresAt(optional)
-     * @return 생성 결과
-     */
     @PostMapping(
         path = "/{projectId}/versions/zip",
         consumes = MediaType.MULTIPART_FORM_DATA_VALUE
@@ -113,19 +101,15 @@ public class ProjectVersionController {
         return ResponseEntity.ok(new CreateFromZipResponse(
             res.projectVersionId(),
             res.sourceRootPath(),
-            res.uploadZipPath()
+            res.uploadZipPath(),
+            res.analysisRunId(),
+            res.autoRunError()
         ));
         } catch (Exception e) {
         throw new IllegalStateException("zip upload failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * ISO-8601 Instant 문자열을 파싱한다(빈 값이면 null).
-     *
-     * @param s expiresAt string
-     * @return Instant or null
-     */
     private Instant parseInstantOrNull(String s) {
         if (s == null || s.isBlank()) return null;
         return Instant.parse(s.trim());

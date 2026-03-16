@@ -19,6 +19,7 @@ import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
@@ -117,6 +118,7 @@ public class WorkerWiringConfig {
         MscanGatewayYamlPort mscanGatewayYamlPort,
         MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort,
         MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
+        MscanResultPort mscanResultPort,
         ToolLlmConfig toolLlmConfig
     ) {
         return new PipelineExecutor(
@@ -140,6 +142,7 @@ public class WorkerWiringConfig {
             mscanGatewayYamlPort,
             mscanGatewayYamlCommandPort,
             mscanRunSummaryCommandPort,
+            mscanResultPort,
             toolLlmConfig
         );
     }

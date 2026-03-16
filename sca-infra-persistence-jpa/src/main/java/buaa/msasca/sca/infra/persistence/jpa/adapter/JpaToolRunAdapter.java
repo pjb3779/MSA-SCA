@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import buaa.msasca.sca.core.domain.enums.ToolType;
 import buaa.msasca.sca.core.domain.model.ToolRun;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunPort;
@@ -71,7 +72,7 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
         ServiceModuleEntity sm = serviceModuleRepo.findById(serviceModuleId)
             .orElseThrow(() -> new IllegalArgumentException("service_module not found: " + serviceModuleId));
 
-        ToolRunEntity tr = ToolRunEntity.create(ar, buaa.msasca.sca.core.domain.enums.ToolType.BUILD, toolVersion, configJson);
+        ToolRunEntity tr = ToolRunEntity.create(ar, ToolType.BUILD, toolVersion, configJson);
         ToolRunEntity saved = toolRunRepo.save(tr);
 
         BuildRunDetailEntity detail = BuildRunDetailEntity.create(saved, sm);
@@ -88,7 +89,7 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
         ServiceModuleEntity sm = serviceModuleRepo.findById(serviceModuleId)
             .orElseThrow(() -> new IllegalArgumentException("service_module not found: " + serviceModuleId));
 
-        ToolRunEntity tr = ToolRunEntity.create(ar, buaa.msasca.sca.core.domain.enums.ToolType.CODEQL, toolVersion, configJson);
+        ToolRunEntity tr = ToolRunEntity.create(ar, ToolType.CODEQL, toolVersion, configJson);
         ToolRunEntity saved = toolRunRepo.save(tr);
 
         CodeqlRunDetailEntity detail = CodeqlRunDetailEntity.create(saved, sm);
@@ -103,7 +104,7 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
         AnalysisRunEntity ar = analysisRunRepo.findById(analysisRunId)
             .orElseThrow(() -> new IllegalArgumentException("analysis_run not found: " + analysisRunId));
 
-        ToolRunEntity tr = ToolRunEntity.create(ar, buaa.msasca.sca.core.domain.enums.ToolType.AGENT, toolVersion, configJson);
+        ToolRunEntity tr = ToolRunEntity.create(ar, ToolType.AGENT, toolVersion, configJson);
         ToolRunEntity saved = toolRunRepo.save(tr);
 
         AgentRunDetailEntity detail = AgentRunDetailEntity.create(saved, modelName);
@@ -118,7 +119,7 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
         AnalysisRunEntity ar = analysisRunRepo.findById(analysisRunId)
             .orElseThrow(() -> new IllegalArgumentException("analysis_run not found: " + analysisRunId));
 
-        ToolRunEntity tr = ToolRunEntity.create(ar, buaa.msasca.sca.core.domain.enums.ToolType.MSCAN, toolVersion, configJson);
+        ToolRunEntity tr = ToolRunEntity.create(ar, ToolType.MSCAN, toolVersion, configJson);
         ToolRunEntity saved = toolRunRepo.save(tr);
 
         MscanRunDetailEntity detail = MscanRunDetailEntity.create(saved);

@@ -1,54 +1,57 @@
 package buaa.msasca.sca.core.application.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import buaa.msasca.sca.core.domain.model.AnalysisRun;
-import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
+import buaa.msasca.sca.core.port.in.CreateAnalysisRunUseCase;
 
+/**
+ * source cache 준비 완료 후 analysis_run을 자동 생성(패턴 B).
+ * - 이미 active run(PENDING/RUNNING)이 있으면 생성하지 않고 "skipped" 반환
+ */
 public class EnqueueAnalysisRunOnSourceReadyService {
 
-    private final AnalysisRunCommandPort analysisRunCommandPort;
-    private final ObjectMapper om;
+    private final CreateAnalysisRunUseCase createAnalysisRunUseCase;
 
-    public EnqueueAnalysisRunOnSourceReadyService(AnalysisRunCommandPort analysisRunCommandPort, ObjectMapper om) {
-        this.analysisRunCommandPort = analysisRunCommandPort;
-        this.om = om;
+    public EnqueueAnalysisRunOnSourceReadyService(CreateAnalysisRunUseCase createAnalysisRunUseCase) {
+        this.createAnalysisRunUseCase = createAnalysisRunUseCase;
     }
 
-    /**
-     * 소스 준비 완료 시점에 analysis_run(PENDING)을 자동 생성한다.
-     * - 같은 project_version에 PENDING/RUNNING이 있으면 중복 생성하지 않는다.
-     *
-     * @param projectVersionId project_version id
-     * @param triggeredBy 트리거 주체(예: "api")
-     * @return 생성된 run, 없으면 null
-     */
-    public AnalysisRun enqueueIfAbsent(Long projectVersionId, String triggeredBy) {
-        if (analysisRunCommandPort.existsActiveRun(projectVersionId)) {
-        return null;
+    public Result enqueueIfAbsent(Long projectVersionId, JsonNode configJson, String triggeredBy) {
+        try {
+        AnalysisRun created = createAnalysisRunUseCase.handle(new CreateAnalysisRunUseCase.Command(
+            projectVersionId,
+            configJson,
+            triggeredBy,
+            true // requireSourceCache
+        ));
+
+        if (created == null) {
+            return Result.skipped("active run already exists (skipped)");
         }
-
-        ObjectNode config = om.createObjectNode();
-        config.put("pipeline", "default");
-        config.put("stage", "build"); // 지금은 BUILD만 돌리는 모드면 여기로 표시
-
-        return analysisRunCommandPort.createPending(projectVersionId, config, triggeredBy);
+        return Result.created(created.id());
+        } catch (Exception e) {
+        return Result.failed("auto-run failed: " + safeMsg(e));
+        }
     }
 
-    /**
-     * 외부에서 config를 주입하고 싶을 때 사용.
-     *
-     * @param projectVersionId project_version id
-     * @param configJson config
-     * @param triggeredBy triggered_by
-     * @return 생성된 run, 없으면 null
-     */
-    public AnalysisRun enqueueIfAbsent(Long projectVersionId, JsonNode configJson, String triggeredBy) {
-        if (analysisRunCommandPort.existsActiveRun(projectVersionId)) {
-        return null;
+    private String safeMsg(Exception e) {
+        return (e.getMessage() == null) ? e.toString() : e.getMessage();
+    }
+
+    public record Result(
+        Long analysisRunId,
+        boolean skipped,
+        String errorMessage
+    ) {
+        public static Result created(Long runId) {
+        return new Result(runId, false, null);
         }
-        return analysisRunCommandPort.createPending(projectVersionId, configJson, triggeredBy);
+        public static Result skipped(String msg) {
+        return new Result(null, true, msg);
+        }
+        public static Result failed(String msg) {
+        return new Result(null, false, msg);
+        }
     }
 }

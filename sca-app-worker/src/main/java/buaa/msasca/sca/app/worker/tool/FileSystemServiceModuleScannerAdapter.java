@@ -103,8 +103,8 @@ public class FileSystemServiceModuleScannerAdapter implements ServiceModuleScann
         String name = relPath.isBlank() ? "root" : relPath;
 
         String jdk = hasPom ? tryParseJdkFromPom(pom) : tryParseJdkFromGradle(moduleDir);
-        boolean gateway = hasPom ? hasGatewayDependencyInPom(pom) : hasGatewayHintInGradle(moduleDir);
-
+        boolean gateway = isGatewayModule(relPath, hasPom ? pom : null, moduleDir);
+        
         return new DetectedServiceModule(name, relPath, tool, jdk, gateway);
     }
 
@@ -241,6 +241,71 @@ public class FileSystemServiceModuleScannerAdapter implements ServiceModuleScann
         return txt.contains("spring-cloud-starter-gateway");
         } catch (Exception e) {
         return false;
+        }
+    }
+
+    /**
+     * is_gateway=true를 주는 조건(매우 보수적):
+     * 1) 모듈 경로/이름에 gateway 포함
+     * 2) 빌드 파일에 spring-cloud-starter-gateway 포함
+     * 3) resources/application*.yml(yaml)에 gateway 설정 흔적 포함
+     */
+    private boolean isGatewayModule(String relPath, Path pomOrNull, Path moduleDir) {
+        // (1) 이름 힌트: "gateway" 포함
+        if (!hasGatewayNameHint(relPath, moduleDir)) return false;
+
+        // (2) 의존성 힌트: spring-cloud-starter-gateway 포함
+        boolean hasDep = (pomOrNull != null)
+            ? hasGatewayDependencyInPom(pomOrNull)
+            : hasGatewayHintInGradle(moduleDir);
+
+        if (!hasDep) return false;
+
+        // (3) 설정 힌트: application*.yml(yaml)에 spring cloud gateway 설정 흔적
+        if (!hasSpringCloudGatewayConfigHint(moduleDir)) return false;
+
+        return true;
+    }
+
+    private boolean hasGatewayNameHint(String relPath, Path moduleDir) {
+        String s1 = (relPath == null) ? "" : relPath.toLowerCase();
+        String s2 = (moduleDir == null) ? "" : moduleDir.getFileName().toString().toLowerCase();
+        return s1.contains("gateway") || s2.contains("gateway");
+    }
+
+    private boolean hasSpringCloudGatewayConfigHint(Path moduleDir) {
+        try {
+            Path resources = moduleDir.resolve("src").resolve("main").resolve("resources");
+            if (!Files.isDirectory(resources)) return false;
+
+            try (Stream<Path> s = Files.walk(resources, 4)) {
+                return s.filter(Files::isRegularFile)
+                    .filter(p -> {
+                        String fn = p.getFileName().toString().toLowerCase();
+                        // application*.yml|yaml만
+                        return fn.startsWith("application") && (fn.endsWith(".yml") || fn.endsWith(".yaml"));
+                    })
+                    .anyMatch(p -> {
+                        try {
+                            String t = Files.readString(p).toLowerCase();
+
+                            // 보수적으로: 두 패턴 중 하나라도 있으면 gateway 설정이라고 판단
+                            // 1) properties 스타일
+                            if (t.contains("spring.cloud.gateway")) return true;
+
+                            // 2) yaml nested 스타일(매우 흔함)
+                            //    spring:
+                            //      cloud:
+                            //        gateway:
+                            // 단, 단순 contains로는 false positive 가능성이 아주 낮다고 보고 사용
+                            return t.contains("spring:") && t.contains("cloud:") && t.contains("gateway:");
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    });
+            }
+        } catch (Exception e) {
+            return false;
         }
     }
 

@@ -1,11 +1,15 @@
 package buaa.msasca.sca.infra.storage.local;
 
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
+import buaa.msasca.sca.core.port.out.tool.StoragePort.StoredObject;
 
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.stream.Stream;
 
 public class LocalStoragePortAdapter implements StoragePort {
 
@@ -59,6 +63,20 @@ public class LocalStoragePortAdapter implements StoragePort {
     }
   }
 
+  @Override
+  public InputStream open(String storagePath) {
+    try {
+      URI uri = URI.create(storagePath);
+      if (!"file".equalsIgnoreCase(uri.getScheme())) {
+        throw new UnsupportedOperationException("LocalStorage supports file:// only. uri=" + storagePath);
+      }
+      Path p = Path.of(uri);
+      return Files.newInputStream(p);
+    } catch (Exception e) {
+      throw new IllegalStateException("Storage open failed: " + storagePath, e);
+    }
+  }
+
   /**
    * key를 OS 경로로 안전하게 정규화한다.
    * - 윈도우 역슬래시를 슬래시로 변환
@@ -72,5 +90,32 @@ public class LocalStoragePortAdapter implements StoragePort {
     String k = key.replace("\\", "/");
     while (k.startsWith("/")) k = k.substring(1);
     return k;
+  }
+
+  @Override
+  public List<StoredObject> list(String keyPrefix) {
+    try {
+      String prefix = normalizeKey(keyPrefix);
+      Path dir = baseDir.resolve(prefix);
+      if (!Files.exists(dir)) return List.of();
+
+      // prefix가 파일이면 그 1개만
+      if (Files.isRegularFile(dir)) {
+        return List.of(new StoredObject(prefix, dir.toUri().toString()));
+      }
+
+      if (!Files.isDirectory(dir)) return List.of();
+
+      try (Stream<Path> s = Files.walk(dir)) {
+        return s.filter(Files::isRegularFile)
+            .map(p -> {
+              String rel = baseDir.relativize(p).toString().replace("\\", "/");
+              return new StoredObject(rel, p.toUri().toString());
+            })
+            .toList();
+      }
+    } catch (Exception e) {
+      throw new IllegalStateException("Storage list failed: " + keyPrefix, e);
+    }
   }
 }

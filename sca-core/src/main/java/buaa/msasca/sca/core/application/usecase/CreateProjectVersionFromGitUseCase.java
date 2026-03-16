@@ -22,6 +22,8 @@ public interface CreateProjectVersionFromGitUseCase {
 
     record Response(
         Long projectVersionId,
-        String sourceRootPath
+        String sourceRootPath,
+        Long analysisRunId,
+        String autoRunError
     ) {}
 }

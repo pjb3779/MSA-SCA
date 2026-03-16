@@ -24,6 +24,8 @@ public interface CreateProjectVersionFromZipUseCase {
     record Response(
         Long projectVersionId,
         String sourceRootPath,
-        String uploadZipPath
+        String uploadZipPath,
+        Long analysisRunId,
+         String autoRunError 
     ) {}
 }

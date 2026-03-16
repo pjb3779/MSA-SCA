@@ -1,5 +1,6 @@
 package buaa.msasca.sca.core.application.service;
 
+import buaa.msasca.sca.core.application.support.MscanConfigAutoBuilder;
 import buaa.msasca.sca.core.application.support.WorkspacePathResolver;
 import buaa.msasca.sca.core.application.usecase.CreateProjectVersionFromZipUseCase;
 import buaa.msasca.sca.core.domain.enums.SourceType;
@@ -18,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class CreateProjectVersionFromZipService implements CreateProjectVersionFromZipUseCase {
 
@@ -92,10 +95,23 @@ public class CreateProjectVersionFromZipService implements CreateProjectVersionF
     // 6) source cache 생성
     cacheCommandPort.createNewValid(pv.id(), sourceRoot, req.expiresAt());
 
-    //source_cache가 valid 된 뒤 analysis_run 자동 생성
-    enqueueService.enqueueIfAbsent(pv.id(), null, "system");
+    //7)config_json 자동 생성 + analysis_run 자동 생성
+    Long runId = null;
+    String autoErr = null;
+    try {
+      ObjectNode autoCfg = MscanConfigAutoBuilder.buildDefaultConfig(pv.id(), sourceRoot);
+      var enq = enqueueService.enqueueIfAbsent(pv.id(), autoCfg, "system");
+      runId = enq.analysisRunId();
+      autoErr = enq.errorMessage();
+      // skipped 메시지도 autoErr로 내려서 Postman에서 바로 보이게
+      if (autoErr == null && enq.skipped()) {
+        autoErr = "active run already exists (skipped)";
+      }
+    } catch (Exception e) {
+      autoErr = (e.getMessage() == null) ? e.toString() : e.getMessage();
+    }
 
-    return new Response(pv.id(), sourceRoot, uploadZipPath);
+    return new Response(pv.id(), sourceRoot, uploadZipPath, runId, autoErr);
   }
 
   /**

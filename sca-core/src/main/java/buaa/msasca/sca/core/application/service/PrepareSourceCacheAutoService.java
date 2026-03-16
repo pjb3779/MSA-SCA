@@ -6,8 +6,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import buaa.msasca.sca.core.application.support.MscanConfigAutoBuilder;
 import buaa.msasca.sca.core.domain.model.ProjectVersionSourceCache;
 import buaa.msasca.sca.core.domain.model.ProjectVersionView;
+import buaa.msasca.sca.core.port.in.CreateAnalysisRunUseCase;
 import buaa.msasca.sca.core.port.in.PrepareSourceCacheAutoUseCase;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCacheCommandPort;
@@ -21,6 +25,7 @@ public class PrepareSourceCacheAutoService implements PrepareSourceCacheAutoUseC
     private final ProjectVersionSourceCacheCommandPort cacheCommandPort;
     private final RunnerPort runnerPort;
 
+    private final CreateAnalysisRunUseCase createAnalysisRunUseCase;
     private final String workspaceBasePath;
 
     public PrepareSourceCacheAutoService(
@@ -28,13 +33,15 @@ public class PrepareSourceCacheAutoService implements PrepareSourceCacheAutoUseC
         ProjectVersionSourceCachePort cachePort,
         ProjectVersionSourceCacheCommandPort cacheCommandPort,
         RunnerPort runnerPort,
-        String workspaceBasePath
+        String workspaceBasePath,
+        CreateAnalysisRunUseCase createAnalysisRunUseCase
     ) {
         this.projectVersionPort = projectVersionPort;
         this.cachePort = cachePort;
         this.cacheCommandPort = cacheCommandPort;
         this.runnerPort = runnerPort;
         this.workspaceBasePath = workspaceBasePath;
+        this.createAnalysisRunUseCase = createAnalysisRunUseCase;
     }
 
     /**
@@ -49,18 +56,35 @@ public class PrepareSourceCacheAutoService implements PrepareSourceCacheAutoUseC
             .orElseThrow(() -> new IllegalArgumentException("project_version not found: " + command.projectVersionId()));
 
         if (!command.forceRefresh()) {
-        var existing = cachePort.findValidByProjectVersionId(pv.id());
-        if (existing.isPresent()) return existing.get();
+            var existing = cachePort.findValidByProjectVersionId(pv.id());
+            if (existing.isPresent()) return existing.get();
         }
 
         String preparedPath = switch (pv.sourceType()) {
-        case ZIP -> prepareZip(pv);
-        case GIT -> prepareGit(pv);
-        case OTHER -> prepareOther(pv);
+            case ZIP -> prepareZip(pv);
+            case GIT -> prepareGit(pv);
+            case OTHER -> prepareOther(pv);
         };
 
         Instant expiresAt = command.expiresAt();
-        return cacheCommandPort.createNewValid(pv.id(), preparedPath, expiresAt);
+        ProjectVersionSourceCache cache = cacheCommandPort.createNewValid(pv.id(), preparedPath, expiresAt);
+
+        autoCreateAnalysiRun(pv, cache);
+
+        return cache;
+    }
+
+    private void autoCreateAnalysiRun(ProjectVersionView pv, ProjectVersionSourceCache cache) {
+        // 소스 루트에서 package 스캔해서 mscan.classpathKeywords 자동 추출
+        ObjectNode autoConfig = MscanConfigAutoBuilder.buildDefaultConfig(pv.id(), cache.storagePath());
+
+        // CreateAnalysisRunService가 existsActiveRun 막아주므로 중복 호출돼도 안전
+        createAnalysisRunUseCase.handle(new CreateAnalysisRunUseCase.Command(
+            pv.id(),
+            autoConfig,
+            "auto-source-cache",
+            true // requireSourceCache
+        ));
     }
 
     /** ZIP 소스를 workspace에 압축해제한다. */

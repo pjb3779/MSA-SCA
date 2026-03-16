@@ -49,6 +49,12 @@ public class AnalysisRunController {
             requireCache
         ));
 
+        if (run == null) {
+            // active run이 이미 있어서 생성 안 된 케이스
+            // 지금 프로젝트 스타일 유지: 예외로 명확히 반환(409가 더 좋지만 일단 IllegalStateException)
+            throw new IllegalStateException("Active run already exists for projectVersionId=" + projectVersionId);
+        }
+
         return new AnalysisRunResponse(
             run.id(),
             run.projectVersionId(),

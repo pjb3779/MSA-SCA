@@ -45,17 +45,4 @@ public class WorkerStubPortsConfig {
         throw new UnsupportedOperationException("Agent not implemented yet");
         };
     }
-
-    /**
-     * MScan 미구현 시 부팅/BUILD 검증을 위한 Stub.
-     *
-     * @return MscanPort
-     */
-    @Bean
-    @ConditionalOnMissingBean(MscanPort.class)
-    public MscanPort mscanPortStub() {
-        return (toolRunId, projectVersionId, sourceRootPath) -> {
-        throw new UnsupportedOperationException("MScan not implemented yet");
-        };
-    }
 }
