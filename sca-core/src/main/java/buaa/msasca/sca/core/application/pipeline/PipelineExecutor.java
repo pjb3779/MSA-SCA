@@ -51,6 +51,8 @@ import buaa.msasca.sca.core.port.out.tool.ServiceModuleScannerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.core.port.out.tool.ToolImageConfig;
 import buaa.msasca.sca.core.port.out.tool.ToolLlmConfig;
+import buaa.msasca.sca.core.application.error.InvalidConfigException;
+import buaa.msasca.sca.core.application.error.ToolExecutionException;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -998,12 +1000,12 @@ public class PipelineExecutor {
     try (Stream<Path> s = Files.list(jarDir)) {
       boolean hasJar = s.anyMatch(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".jar"));
       if (!hasJar) {
-        throw new IllegalStateException("MScan jar dir is empty: " + jarDir + " (no *.jar staged)");
+        throw ToolExecutionException.mscan(null, "MScan jar dir is empty: " + jarDir + " (no *.jar staged)");
       }
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
-      throw new IllegalStateException("Failed to inspect mscan jar dir: " + jarDir, e);
+      throw ToolExecutionException.mscan(null, "Failed to inspect mscan jar dir: " + jarDir, e);
     }
   }
 
@@ -1027,7 +1029,7 @@ public class PipelineExecutor {
         try {
           Files.createDirectories(jarDir);
         } catch (java.io.IOException e) {
-          throw new IllegalStateException("Failed to create mscan jar dir: " + jarDir, e);
+          throw ToolExecutionException.mscan(tr.id(), "Failed to create mscan jar dir: " + jarDir, e);
         }
       }
 
@@ -1053,22 +1055,22 @@ public class PipelineExecutor {
               : Path.of(sourceRootPath).resolve(optionsRel).toString();
 
       if (name == null || name.isBlank()) {
-        throw new IllegalStateException("Missing analysis_run.config_json: mscan.name");
+        throw new InvalidConfigException("Missing analysis_run.config_json: mscan.name");
       }
       if (keywords == null || keywords.isBlank()) {
-        throw new IllegalStateException("Missing analysis_run.config_json: mscan.classpathKeywords");
+        throw new InvalidConfigException("Missing analysis_run.config_json: mscan.classpathKeywords");
       }
 
       // 4) gateway.yml 경로(캐시에 재물질화되어 있어야 함)
       String gatewayOnHost = Path.of(sourceRootPath).resolve(MSCAN_GATEWAY_REL_PATH).toString();
       if (!Files.exists(Path.of(gatewayOnHost))) {
-        throw new IllegalStateException("gateway.yml not found in cache: " + gatewayOnHost);
+        throw new InvalidConfigException("MScan gateway.yml not found in cache: " + gatewayOnHost);
       }
 
       // 5) 이미지/키 확인
       String mscanImage = toolImageConfig.mscanImage();
       if (mscanImage == null || mscanImage.isBlank()) {
-        throw new IllegalStateException("MScan docker image not configured. Set sca.tool.images.mscan");
+        throw new InvalidConfigException("MScan docker image not configured. Set sca.tool.images.mscan");
       }
 
       String llmApiKey = toolLlmConfig.openAiApiKey();
@@ -1076,7 +1078,7 @@ public class PipelineExecutor {
       String model      = toolLlmConfig.openAiModel();
 
       if (llmApiKey == null || llmApiKey.isBlank()) {
-        throw new IllegalStateException("OPENAI API key not configured. Set sca.tool.llm.openai-api-key");
+        throw new InvalidConfigException("OPENAI API key not configured. Set sca.tool.llm.openai-api-key");
       }
 
       dockerImagePort.ensurePresent(mscanImage, Duration.ofMinutes(20));
@@ -1149,7 +1151,11 @@ public class PipelineExecutor {
             null,
             java.time.Instant.now()
         );
-        throw new IllegalStateException("MScan ingest failed: " + e.getMessage(), e);
+        throw ToolExecutionException.mscan(
+            tr.id(),
+            "MScan ingest failed: " + e.getMessage(),
+            e
+        );
       }
     });
   }
@@ -1167,7 +1173,7 @@ public class PipelineExecutor {
       return (int) s.filter(line -> line != null && !line.isBlank()).count();
     } catch (Exception e) {
       // 파싱 자체 실패는 ingest 실패로 보는 게 맞아서 예외로 올림
-      throw new IllegalStateException("Failed to read mscan report: " + p, e);
+      throw ToolExecutionException.mscan(null, "Failed to read mscan report: " + p, e);
     }
   }
 

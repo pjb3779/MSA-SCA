@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import buaa.msasca.sca.core.domain.enums.CodeqlSummaryStatus;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
+import buaa.msasca.sca.core.application.error.ToolExecutionException;
 
 public class CodeqlSarifIngestService {
 
@@ -129,7 +130,11 @@ public class CodeqlSarifIngestService {
             null,
             now
         );
-        throw new IllegalStateException("SARIF ingest failed: toolRunId=" + codeqlToolRunId + " path=" + sarifPathOnHost, e);
+        throw ToolExecutionException.codeql(
+            codeqlToolRunId,
+            "SARIF ingest failed: toolRunId=" + codeqlToolRunId + " path=" + sarifPathOnHost,
+            e
+        );
         }
     }
 

@@ -29,8 +29,6 @@ import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCacheComman
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
-import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
-import buaa.msasca.sca.infra.storage.local.LocalStoragePortAdapter;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,12 +37,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
 public class ApiWiringConfig {
-
-  /** 로컬 실행 RunnerPort */
-  @Bean
-  public RunnerPort runnerPort() {
-    return new LocalProcessRunnerPortAdapter();
-  }
 
   /** workspace path resolver: Windows 경로 */
   @Bean
@@ -130,14 +122,6 @@ public class ApiWiringConfig {
   ) {
       return new EnsureMscanGatewayYamlService(commandPort);
   }
-
-  // API에서도 임시로 로컬 스토리지 사용(개발 단계)
-  @Bean
-  @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(StoragePort.class)
-  public StoragePort storagePort() {
-    return new LocalStoragePortAdapter();
-  }
-
 
   //test
   @Bean
