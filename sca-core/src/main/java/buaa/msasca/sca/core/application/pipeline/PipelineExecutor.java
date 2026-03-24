@@ -36,6 +36,7 @@ import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
+import buaa.msasca.sca.core.port.out.persistence.SanitizerResultCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
@@ -44,6 +45,7 @@ import buaa.msasca.sca.core.port.out.persistence.ToolRunPort;
 import buaa.msasca.sca.core.port.out.tool.AgentPort;
 import buaa.msasca.sca.core.port.out.tool.BuildImageResolver;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
+import buaa.msasca.sca.core.port.out.tool.CodeqlConfig;
 import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
 import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
@@ -79,6 +81,7 @@ public class PipelineExecutor {
   private final ServiceModuleCommandPort serviceModuleCommandPort;
 
   private final CodeqlPort codeqlPort;
+  private final CodeqlConfig codeqlConfig;
   private final CodeqlSarifIngestService codeqlSarifIngestService;
 
   private final MscanPort mscanPort;
@@ -86,6 +89,7 @@ public class PipelineExecutor {
   private final MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort;
   private final MscanRunSummaryCommandPort mscanRunSummaryCommandPort;
   private final MscanResultPort mscanResultPort;
+  private final SanitizerResultCommandPort sanitizerResultCommandPort;
   private final ToolLlmConfig toolLlmConfig;
   private final ToolImageConfig toolImageConfig;
 
@@ -95,6 +99,7 @@ public class PipelineExecutor {
   private static final String MSCAN_GATEWAY_REL_PATH = ".msasca/mscan/gateway.yml";
   private static final String MSCAN_JAR_DIR_REL_PATH = ".msasca/mscan/jars";
   private static final String MSCAN_REPORT_REL_PATH  = ".msasca/mscan/report.txt";
+  private static final String CODEQL_NO_SOURCE_MARKER = "did not detect any code written in languages supported";
   
   public PipelineExecutor(
       AnalysisRunCommandPort analysisRunCommandPort,
@@ -108,6 +113,7 @@ public class PipelineExecutor {
       BuildImageResolver buildImageResolver,
       DockerImagePort dockerImagePort,
       CodeqlPort codeqlPort,
+      CodeqlConfig codeqlConfig,
       AgentPort agentPort,
       MscanPort mscanPort,
       ServiceModuleScannerPort serviceModuleScannerPort,
@@ -118,6 +124,7 @@ public class PipelineExecutor {
       MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort,
       MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
       MscanResultPort mscanResultPort,
+      SanitizerResultCommandPort sanitizerResultCommandPort,
       ToolLlmConfig toolLlmConfig
   ) {
     this.analysisRunCommandPort = analysisRunCommandPort;
@@ -131,6 +138,7 @@ public class PipelineExecutor {
     this.buildImageResolver = buildImageResolver;
     this.dockerImagePort = dockerImagePort;
     this.codeqlPort = codeqlPort;
+    this.codeqlConfig = codeqlConfig;
     this.agentPort = agentPort;
     this.mscanPort = mscanPort;
     this.serviceModuleScannerPort = serviceModuleScannerPort;
@@ -141,6 +149,7 @@ public class PipelineExecutor {
     this.mscanGatewayYamlCommandPort = mscanGatewayYamlCommandPort;
     this.mscanRunSummaryCommandPort = mscanRunSummaryCommandPort;
     this.mscanResultPort = mscanResultPort;
+    this.sanitizerResultCommandPort = sanitizerResultCommandPort;
     this.toolLlmConfig = toolLlmConfig;
   }
 
@@ -174,6 +183,9 @@ public class PipelineExecutor {
       throw new IllegalStateException("No service modules detected for projectVersionId=" + run.projectVersionId());
     }
 
+    // Agent 1단계: 약한 신호 기반 경량 모듈 선별(실패 시 fail-open)
+    List<ServiceModule> selectedModules = runAgentPrefilterStage(run.id(), run.projectVersionId(), sourceRootPath, modules);
+
     // 테스트용
     String mode = "";
     if (run.configJson() != null) {
@@ -181,19 +193,20 @@ public class PipelineExecutor {
     }
     boolean mscanOnly = "MSCAN_ONLY".equalsIgnoreCase(mode);
 
-    //mscan 얌파일 체크
-    requireGatewayModuleAndYaml(run.projectVersionId(), sourceRootPath, modules);
+    // 게이트웨이 YAML 존재 검증 (필수)
+    requireGatewayModuleAndYaml(run.projectVersionId(), sourceRootPath, selectedModules);
 
     try {
       log.info("[PIPE] start analysisRunId={}, projectVersionId={}", analysisRunId, run.projectVersionId());
 
       if (mscanOnly) {
-        runMscanStage(run, sourceRootPath, modules);
+        AgentPort.AgentKnowledge knowledge = runAgentKnowledgeStage(run.id(), run.projectVersionId(), sourceRootPath);
+        runMscanStage(run, sourceRootPath, selectedModules, knowledge);
         return;
       }
 
       //모듈별 이미지 결정(파일 기반) + distinct 이미지 선-ensure
-      List<BuildPlan> buildPlans = prepareBuildPlans(modules, sourceRootPath);
+      List<BuildPlan> buildPlans = prepareBuildPlans(selectedModules, sourceRootPath);
 
       //     buildPlans.size(),
       //     buildPlans.stream().map(BuildPlan::image).distinct().toList()
@@ -212,12 +225,12 @@ public class PipelineExecutor {
       //log.info("[PIPE] step6 runBuildStage start");
       runBuildStage(analysisRunId, buildPlans, sourceRootPath);
 
-      //runCodeqlStage(analysisRunId, modules, sourceRootPath);
+      runCodeqlStage(analysisRunId, selectedModules, sourceRootPath);
 
-      // runAgentStage(analysisRunId, run.projectVersionId(), sourceRootPath);
+      AgentPort.AgentKnowledge knowledge = runAgentKnowledgeStage(analysisRunId, run.projectVersionId(), sourceRootPath);
 
       //런 내부의 값을 반드시 읽어야함
-      runMscanStage(run, sourceRootPath, modules);
+      runMscanStage(run, sourceRootPath, selectedModules, knowledge);
 
       log.info("[PIPE] finished OK analysisRunId={}", analysisRunId);
 
@@ -860,54 +873,125 @@ public class PipelineExecutor {
     for (ServiceModule m : modules) {
       ToolRun tr = toolRunCommandPort.createCodeqlRun(analysisRunId, m.id(), "codeql", codeqlConfigJson(m));
 
-      runTool(tr.id(), () -> {
-        String buildCmd = codeqlBuildCommandFor(m);
-
-        CodeqlPort.CreateDbResult db = codeqlPort.createDatabase(new CodeqlPort.CreateDbRequest(
-            tr.id(),
+      // 소스 파일이 없는 모듈(starter/bom 등)은 CodeQL DB 생성 시 실패(exit 32)하므로 사전 스킵한다.
+      if (!hasJavaOrKotlinSource(sourceRootPath, m.rootPath())) {
+        String skipReason = String.format(
+            "serviceModuleId=%d module=%s reason=no Java/Kotlin source files under module root",
             m.id(),
-            sourceRootPath,
-            m.rootPath(),
-            "java",
-            buildCmd,
-            codeqlDockerImageFor(m),
-            "codeql-db",
-            Duration.ofMinutes(600) //반드시 일단 600 추후 수정
-        ));
-
-        storeLocalPathArtifact(tr.id(), ArtifactType.CODEQL_DB, "codeql-db", db.dbDirPathOnHost());
-        storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-db-stdout.log", db.stdout());
-        storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-db-stderr.log", db.stderr());
-
-        CodeqlPort.RunQueriesResult sarif = codeqlPort.runQueries(new CodeqlPort.RunQueriesRequest(
-            tr.id(),
-            m.id(),
-            codeqlDockerImageFor(m),
-            db.dbDirPathOnHost(),
-            List.of("codeql/java-queries"),
-            "result.sarif",
-            Duration.ofMinutes(120)
-        ));
-
-        Path sarifHostPath = Path.of(sarif.sarifPathOnHost());
-        String sarifStorageUri = storeFileArtifact(tr.id(), ArtifactType.OTHER, "result.sarif", sarifHostPath);
-
-        storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stdout.log", sarif.stdout());
-        storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stderr.log", sarif.stderr());
-
-        //ADDED: SARIF -> DB 적재 호출 (0건이면 CLEAN summary만 저장)
-        codeqlSarifIngestService.ingest(
-            tr.id(),
-            m.id(),
-            sarifHostPath.toString(),
-            sarifStorageUri
+            m.name() != null ? m.name() : m.rootPath()
         );
-      });
+        try {
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-skip.log", skipReason);
+        } catch (Exception logEx) {
+          log.warn("[PIPE] failed to store codeql-skip.log for toolRunId={} serviceModuleId={}", tr.id(), m.id(), logEx);
+        }
+        toolRunPort.markDone(tr.id());
+        log.info("[PIPE] CodeQL skipped (no source) serviceModuleId={} name={} toolRunId={}",
+            m.id(), m.name(), tr.id());
+        continue;
+      }
+
+      try {
+        runTool(tr.id(), () -> {
+          String buildCmd = codeqlBuildCommandFor(m);
+          String fallbackBuildCmd = codeqlFallbackBuildCommandFor(m);
+
+          CodeqlPort.CreateDbResult db = codeqlPort.createDatabase(new CodeqlPort.CreateDbRequest(
+              tr.id(),
+              m.id(),
+              sourceRootPath,
+              m.rootPath(),
+              "java",
+              buildCmd,
+              fallbackBuildCmd,
+              codeqlDockerImageFor(m),
+              "codeql-db",
+              Duration.ofMinutes(600) //반드시 일단 600 추후 수정
+          ));
+
+          storeLocalPathArtifact(tr.id(), ArtifactType.CODEQL_DB, "codeql-db", db.dbDirPathOnHost());
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-db-stdout.log", db.stdout());
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-db-stderr.log", db.stderr());
+
+          CodeqlPort.RunQueriesResult sarif = codeqlPort.runQueries(new CodeqlPort.RunQueriesRequest(
+              tr.id(),
+              m.id(),
+              codeqlDockerImageFor(m),
+              db.dbDirPathOnHost(),
+              List.of("codeql/java-queries"),
+              "result.sarif",
+              Duration.ofMinutes(120),
+              codeqlConfig.analyzeRam()
+          ));
+
+          Path sarifHostPath = Path.of(sarif.sarifPathOnHost());
+          String sarifStorageUri = storeFileArtifact(tr.id(), ArtifactType.OTHER, "result.sarif", sarifHostPath);
+
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stdout.log", sarif.stdout());
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-analyze-stderr.log", sarif.stderr());
+
+          //ADDED: SARIF -> DB 적재 호출 (0건이면 CLEAN summary만 저장)
+          codeqlSarifIngestService.ingest(
+              tr.id(),
+              m.id(),
+              sarifHostPath.toString(),
+              sarifStorageUri
+          );
+        });
+      } catch (Exception e) {
+        // CodeQL DB 생성 실패 시: 실패 사유를 기록하고 다음 모듈로 진행 (부분 실패 허용)
+        String msg = (e.getMessage() == null) ? e.toString() : e.getMessage();
+        if (containsCodeqlNoSourceMarker(msg)) {
+          msg = "codeql database create skipped: no supported source code detected for module";
+        }
+        String failureLog = String.format(
+            "serviceModuleId=%d module=%s reason=%s",
+            m.id(),
+            m.name() != null ? m.name() : m.rootPath(),
+            sanitizeDbText(msg)
+        );
+        try {
+          storeTextArtifact(tr.id(), ArtifactType.OTHER, "codeql-db-failure.log", failureLog);
+        } catch (Exception logEx) {
+          log.warn("[PIPE] failed to store codeql-db-failure.log for toolRunId={} serviceModuleId={}", tr.id(), m.id(), logEx);
+        }
+        log.warn("[PIPE] CodeQL DB creation failed, skipping module serviceModuleId={} name={} toolRunId={}",
+            m.id(), m.name(), tr.id());
+        // runTool 내부에서 이미 tool-error.log 저장 및 markFailed 처리됨. 다음 모듈로 진행.
+      }
     }
   }
 
   /**
-   * CodeQL DB 생성 시 사용할 빌드 커맨드를 만든다.
+   * 모듈 루트 아래에 Java/Kotlin 소스가 최소 1개라도 있는지 확인한다.
+   * CodeQL Java DB는 소스가 없으면 exitCode=32로 실패하므로 사전 판별에 사용한다.
+   */
+  private boolean hasJavaOrKotlinSource(String sourceRootPath, String moduleRootRelPath) {
+    Path sourceRoot = Path.of(sourceRootPath);
+    Path moduleRoot = sourceRoot.resolve(moduleRootRelPath == null ? "" : moduleRootRelPath).normalize();
+
+    if (!moduleRoot.startsWith(sourceRoot) || !Files.exists(moduleRoot) || !Files.isDirectory(moduleRoot)) {
+      return false;
+    }
+
+    try (Stream<Path> s = Files.walk(moduleRoot, 12)) {
+      return s
+          .filter(Files::isRegularFile)
+          .map(p -> p.getFileName().toString().toLowerCase())
+          .anyMatch(name -> name.endsWith(".java") || name.endsWith(".kt"));
+    } catch (Exception e) {
+      // 보수적으로 false 처리해 DB 생성 실패를 피한다.
+      return false;
+    }
+  }
+
+  private boolean containsCodeqlNoSourceMarker(String msg) {
+    if (msg == null || msg.isBlank()) return false;
+    return msg.toLowerCase().contains(CODEQL_NO_SOURCE_MARKER);
+  }
+
+  /**
+   * CodeQL DB 생성 시 사용할 빌드 커맨드(모듈 단위).
    *
    * @param m 서비스 모듈
    * @return build command 문자열
@@ -918,11 +1002,43 @@ public class PipelineExecutor {
         ? "/src"
         : "/src/" + rel;
 
+    String mavenSkips = "-Dfindbugs.skip -Dcheckstyle.skip -Dpmd.skip=true -Dspotbugs.skip "
+        + "-Denforcer.skip -Dmaven.javadoc.skip -DskipTests -Dmaven.test.skip.exec "
+        + "-Dlicense.skip=true -Drat.skip=true -Dspotless.check.skip=true";
+
+    // CodeQL --command는 exec로 실행하므로 cd, && 등 셸 내장을 쓸 수 없음.
+    // mvn -f, gradlew 절대경로, /bin/echo 사용으로 셸 의존 제거.
     return switch (m.buildTool()) {
-      case MAVEN  -> "cd " + targetDir + " && mvn -DskipTests package";
-      case GRADLE -> "cd " + targetDir + " && ./gradlew build -x test";
-      case JAR    -> "echo 'skip build for JAR'";
-      default     -> "echo 'skip build for OTHER'";
+      case MAVEN  -> "mvn -f " + targetDir + "/pom.xml clean package " + mavenSkips;
+      case GRADLE -> targetDir + "/gradlew build -x test";
+      case JAR    -> "/bin/echo 'skip build for JAR'";
+      default     -> "/bin/echo 'skip build for OTHER'";
+    };
+  }
+
+  /**
+   * CodeQL 빌드 실패 시 폴백용 빌드 커맨드(프로젝트 루트).
+   * parent POM 등으로 모듈 단위 빌드가 실패할 때 사용.
+   * Maven multi-module에서 -pl -am으로 해당 모듈과 의존 모듈만 빌드해 parent 해석·빌드 시간을 절약한다.
+   *
+   * @param m 서비스 모듈
+   * @return fallback build command (Maven/Gradle만, 나머지는 null)
+   */
+  private String codeqlFallbackBuildCommandFor(ServiceModule m) {
+    String mavenSkips = "-Dfindbugs.skip -Dcheckstyle.skip -Dpmd.skip=true -Dspotbugs.skip "
+        + "-Denforcer.skip -Dmaven.javadoc.skip -DskipTests -Dmaven.test.skip.exec "
+        + "-Dlicense.skip=true -Drat.skip=true -Dspotless.check.skip=true";
+
+    // 프로젝트 루트 기준: -pl (모듈 지정) -am (의존 모듈 포함)으로 parent POM 해석 가능 + 전체 빌드보다 빠름.
+    return switch (m.buildTool()) {
+      case MAVEN  -> {
+        String moduleSpec = (m.rootPath() != null && !m.rootPath().isBlank())
+            ? m.rootPath()
+            : ".";
+        yield "mvn -f /src/pom.xml clean package -pl " + moduleSpec + " -am " + mavenSkips;
+      }
+      case GRADLE -> "/src/gradlew build -x test";
+      default     -> null;
     };
   }
 
@@ -962,19 +1078,93 @@ public class PipelineExecutor {
   /// AGENT 메서드
   /////////////////////////////////////////////////////////////////////////////////////
 
-  /**
-   * AGENT 단계를 실행한다(프로젝트 버전 단위 1회).
-   *
-   * @param analysisRunId analysis_run ID
-   * @param projectVersionId project_version ID
-   * @param sourceRootPath 소스 루트 경로
-   */
-  private void runAgentStage(Long analysisRunId, Long projectVersionId, String sourceRootPath) {
-    ToolRun tr = toolRunCommandPort.createAgentRun(analysisRunId, "gpt-model-placeholder", "agent", agentConfigJson());
-    runTool(tr.id(), () -> {
-      agentPort.buildSanitizerRegistry(tr.id(), projectVersionId, sourceRootPath);
-      storeTextArtifact(tr.id(), ArtifactType.AGENT_OUTPUT, "agent-output.txt", "agent output placeholder");
-    });
+  private List<ServiceModule> runAgentPrefilterStage(
+      Long analysisRunId,
+      Long projectVersionId,
+      String sourceRootPath,
+      List<ServiceModule> modules
+  ) {
+    ToolRun tr = toolRunCommandPort.createAgentRun(analysisRunId, "agent-prefilter", "agent", agentConfigJson("prefilter"));
+    final List<ServiceModule>[] selected = new List[] { modules };
+    try {
+      runTool(tr.id(), () -> {
+        // 상세 판정을 DB에 반영
+        List<AgentPort.PrefilterDecision> decisions =
+            agentPort.prefilterDecisions(tr.id(), projectVersionId, sourceRootPath, modules);
+        for (AgentPort.PrefilterDecision d : decisions) {
+          if (d.serviceModuleId() == null) continue;
+          serviceModuleCommandPort.updateAnalysisSelection(
+              d.serviceModuleId(),
+              d.selected(),
+              d.reason()
+          );
+        }
+
+        List<ServiceModule> res = agentPort.prefilterModules(tr.id(), projectVersionId, sourceRootPath, modules);
+        if (res == null || res.isEmpty()) {
+          // fail-open: 선택 결과가 비면 기존 모듈 유지
+          selected[0] = modules;
+          storeTextArtifact(tr.id(), ArtifactType.AGENT_OUTPUT, "agent-prefilter.log", "prefilter returned empty. fallback to all modules.");
+        } else {
+          selected[0] = res;
+          storeTextArtifact(
+              tr.id(),
+              ArtifactType.AGENT_OUTPUT,
+              "agent-prefilter.log",
+              "selected=" + res.size() + ", total=" + modules.size()
+          );
+        }
+      });
+    } catch (Exception e) {
+      // Agent prefilter는 fail-open: 원본 모듈로 계속 진행
+      log.warn(
+          "[PIPE] agent prefilter failed. continue with original modules. analysisRunId={}, projectVersionId={}, reason={}",
+          analysisRunId, projectVersionId, e.toString()
+      );
+      selected[0] = modules;
+    }
+    return selected[0];
+  }
+
+  private AgentPort.AgentKnowledge runAgentKnowledgeStage(
+      Long analysisRunId,
+      Long projectVersionId,
+      String sourceRootPath
+  ) {
+    ToolRun tr = toolRunCommandPort.createAgentRun(analysisRunId, "agent-knowledge", "agent", agentConfigJson("knowledge"));
+    final AgentPort.AgentKnowledge[] out = new AgentPort.AgentKnowledge[1];
+    try {
+      runTool(tr.id(), () -> {
+        String gatewayOnHost = Path.of(sourceRootPath).resolve(MSCAN_GATEWAY_REL_PATH).toString();
+        // analysisRunId로 CodeQL finding 조회 → Miner에 SARIF 맥락 전달 (MSCAN_ONLY 시 null)
+        out[0] = agentPort.buildKnowledge(tr.id(), projectVersionId, analysisRunId, sourceRootPath, gatewayOnHost);
+        if (out[0] != null) {
+          if (out[0].sanitizerResults() != null && !out[0].sanitizerResults().isEmpty()) {
+            sanitizerResultCommandPort.saveAgentSanitizerResults(
+                tr.id(),
+                projectVersionId,
+                out[0].sanitizerResults()
+            );
+          }
+          storeTextArtifact(
+              tr.id(),
+              ArtifactType.AGENT_OUTPUT,
+              "agent-knowledge.log",
+              out[0].summary() == null ? "agent knowledge built" : out[0].summary()
+          );
+        } else {
+          storeTextArtifact(tr.id(), ArtifactType.AGENT_OUTPUT, "agent-knowledge.log", "agent knowledge is null");
+        }
+      });
+    } catch (Exception e) {
+      // Agent knowledge는 fail-open: null knowledge로 계속 진행
+      log.warn(
+          "[PIPE] agent knowledge failed. continue without agent artifacts. analysisRunId={}, projectVersionId={}, reason={}",
+          analysisRunId, projectVersionId, e.toString()
+      );
+      out[0] = null;
+    }
+    return out[0];
   }
 
   /////////////////////////////////////////////////////////////////////////////////////
@@ -1016,7 +1206,12 @@ public class PipelineExecutor {
    * @param projectVersionId project_version ID
    * @param sourceRootPath 소스 루트 경로
    */
-  private void runMscanStage(AnalysisRun run, String sourceRootPath, List<ServiceModule> modules) {
+  private void runMscanStage(
+      AnalysisRun run,
+      String sourceRootPath,
+      List<ServiceModule> modules,
+      AgentPort.AgentKnowledge knowledge
+  ) {
 
     //  1) tool_run을 먼저 만든다 (이후 어떤 실패도 tool_run FAILED로 남게 됨)
     ToolRun tr = toolRunCommandPort.createMscanRun(run.id(), "mscan", mscanConfigJson());
@@ -1049,10 +1244,14 @@ public class PipelineExecutor {
       boolean reuse = (cfg != null) && cfg.path("mscan").path("reuse").asBoolean(false);
       String optionsRel = (cfg == null) ? null : cfg.path("mscan").path("optionsFileRelPath").asText(null);
 
-      final String optionsFilePathOnHost =
+      final String optionsFilePathFromConfig =
           (optionsRel == null || optionsRel.isBlank())
               ? null
               : Path.of(sourceRootPath).resolve(optionsRel).toString();
+      final String optionsFilePathOnHost =
+          (knowledge != null && knowledge.mscanOptionsFilePathOnHost() != null && !knowledge.mscanOptionsFilePathOnHost().isBlank())
+              ? knowledge.mscanOptionsFilePathOnHost()
+              : optionsFilePathFromConfig;
 
       if (name == null || name.isBlank()) {
         throw new InvalidConfigException("Missing analysis_run.config_json: mscan.name");
@@ -1061,10 +1260,10 @@ public class PipelineExecutor {
         throw new InvalidConfigException("Missing analysis_run.config_json: mscan.classpathKeywords");
       }
 
-      // 4) gateway.yml 경로(캐시에 재물질화되어 있어야 함)
+      // 4) gateway.yml 경로 (캐시에 존재해야 함)
       String gatewayOnHost = Path.of(sourceRootPath).resolve(MSCAN_GATEWAY_REL_PATH).toString();
       if (!Files.exists(Path.of(gatewayOnHost))) {
-        throw new InvalidConfigException("MScan gateway.yml not found in cache: " + gatewayOnHost);
+        throw new InvalidConfigException("MScan gateway.yml not found in cache: " + gatewayOnHost + ". Please upload gateway.yml.");
       }
 
       // 5) 이미지/키 확인
@@ -1303,10 +1502,7 @@ public class PipelineExecutor {
   
   /**
    * Gateway 모듈이 존재하면 gateway.yml이 READY여야 한다.
-   * READY가 아니면:
-   *  1) 소스(cache)에서 gateway application.yml(yaml) 자동 탐색 시도
-   *  2) 찾으면 Storage에 업로드 + DB에 gateway.yml READY로 등록(upsertReady)
-   *  3) 그래도 못 찾으면 DB에 MISSING ensure 후 실패(사용자 업로드 요구)
+   * READY가 아니면: 1) DB에서 재물질화 시도, 2) gateway 모듈 없으면 실패, 3) 업로드 요구.
    */
   private void requireGatewayModuleAndYaml(Long projectVersionId, String sourceRootPath, List<ServiceModule> modules) {
     Path cachePath = Path.of(sourceRootPath)
@@ -1470,9 +1666,10 @@ public class PipelineExecutor {
    *
    * @return config json
    */
-  private ObjectNode agentConfigJson() {
+  private ObjectNode agentConfigJson(String stage) {
     ObjectNode n = om.createObjectNode();
     n.put("mode", "sanitizer-registry");
+    n.put("stage", stage == null ? "knowledge" : stage);
     return n;
   }
 

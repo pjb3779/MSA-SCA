@@ -100,7 +100,9 @@ public class FileSystemServiceModuleScannerAdapter implements ServiceModuleScann
         BuildTool tool = hasGradle ? BuildTool.GRADLE : BuildTool.MAVEN;
 
         String relPath = normalizeRelPath(sourceRoot.relativize(moduleDir));
-        String name = relPath.isBlank() ? "root" : relPath;
+        // 루트 빌드 파일은 집계/메타 역할인 경우가 많아 분석 모듈로 취급하지 않는다.
+        if (relPath.isBlank()) return null;
+        String name = relPath;
 
         String jdk = hasPom ? tryParseJdkFromPom(pom) : tryParseJdkFromGradle(moduleDir);
         boolean gateway = isGatewayModule(relPath, hasPom ? pom : null, moduleDir);
@@ -132,6 +134,7 @@ public class FileSystemServiceModuleScannerAdapter implements ServiceModuleScann
         for (Path p : rel) {
         String n = p.getFileName().toString();
         if (n.equals(".git")
+            || n.equals(".github")
             || n.equals("node_modules")
             || n.equals("target")
             || n.equals("build")

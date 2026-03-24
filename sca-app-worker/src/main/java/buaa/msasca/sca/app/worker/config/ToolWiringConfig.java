@@ -5,7 +5,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import buaa.msasca.sca.app.worker.config.props.ToolMscanProperties;
+import buaa.msasca.sca.app.worker.config.props.ToolLlmProperties;
 import buaa.msasca.sca.app.worker.config.props.WorkerWorkspaceProperties;
+import buaa.msasca.sca.core.port.out.persistence.CodeqlFindingPort;
+import buaa.msasca.sca.core.port.out.tool.AgentPort;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
 import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
@@ -14,6 +17,7 @@ import buaa.msasca.sca.core.port.out.tool.StoragePort;
 import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
 import buaa.msasca.sca.infra.runner.build.DockerBuildPortAdapter;
 import buaa.msasca.sca.infra.storage.local.LocalStoragePortAdapter;
+import buaa.msasca.sca.tool.agent.AgentPortAdapter;
 import buaa.msasca.sca.tool.codeql.DockerCodeqlPortAdapter;
 import buaa.msasca.sca.tool.mscan.DockerMscanPortAdapter;
 
@@ -58,5 +62,16 @@ public class ToolWiringConfig {
     public MscanPort mscanPort(RunnerPort runnerPort, ToolMscanProperties mscanProps) {
         String mem = mscanProps.hasDockerMemoryLimit() ? mscanProps.dockerMemory() : null;
         return new DockerMscanPortAdapter(runnerPort, mem);
+    }
+
+    /** Agent 포트: CodeqlFindingPort 주입하여 SARIF 연동 Sanitizer 파이프라인 구성 */
+    @Bean
+    public AgentPort agentPort(ToolLlmProperties llmProps, CodeqlFindingPort codeqlFindingPort) {
+        return new AgentPortAdapter(
+            codeqlFindingPort,
+            llmProps.openAiApiKey(),
+            llmProps.openAiBaseUrl(),
+            llmProps.openAiModel()
+        );
     }
 }

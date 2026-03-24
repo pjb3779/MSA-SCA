@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaAnalysisRunAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaArtifactAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlFindingAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanGatewayYamlAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanResultAdapter;
@@ -12,6 +13,7 @@ import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanRunSummaryAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectVersionSourceCacheAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaSanitizerResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleCommandAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaToolRunAdapter;
@@ -32,6 +34,8 @@ import buaa.msasca.sca.infra.persistence.jpa.repository.AnalysisRunJpaRepository
 import buaa.msasca.sca.infra.persistence.jpa.repository.BuildRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.MscanRunDetailJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.SanitizerCandidateJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.SanitizerRegistryJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionSourceCacheJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
@@ -216,6 +220,30 @@ public class PersistenceWiringConfig {
         MscanFindingJpaRepository findingRepo
     ) {
         return new JpaMscanResultAdapter(runDetailRepo, findingRepo);
+    }
+
+    @Bean
+    public JpaCodeqlFindingAdapter codeqlFindingAdapter(
+        CodeqlFindingJpaRepository findingRepo,
+        CodeqlFlowJpaRepository flowRepo,
+        CodeqlFlowStepJpaRepository stepRepo
+    ) {
+        return new JpaCodeqlFindingAdapter(findingRepo, flowRepo, stepRepo);
+    }
+
+    @Bean
+    public JpaSanitizerResultAdapter sanitizerResultAdapter(
+        AgentRunDetailJpaRepository agentDetailRepo,
+        ProjectVersionJpaRepository projectVersionRepo,
+        SanitizerRegistryJpaRepository registryRepo,
+        SanitizerCandidateJpaRepository candidateRepo
+    ) {
+        return new JpaSanitizerResultAdapter(
+            agentDetailRepo,
+            projectVersionRepo,
+            registryRepo,
+            candidateRepo
+        );
     }
 
 }

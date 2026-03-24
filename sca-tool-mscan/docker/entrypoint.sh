@@ -11,7 +11,8 @@ NAME=""
 JAR_PATH=""
 KEYWORDS=""
 TARGET_PATH=""
-OPTIONS_FILE=""
+AGENT_OPTIONS_FILE=""
+TAIE_OPTIONS_FILE=""
 REUSE="false"
 GATEWAY_YAML=""
 OUT=""
@@ -21,6 +22,7 @@ APP_JVM_ARGS="${APP_JVM_ARGS:-}"
 MSCAN_ROOT="/opt/mscan/mscan-src"
 SCAN_DIR="${MSCAN_ROOT}/gateway_entry_scan"
 GRADLE_INIT_SCRIPT="/opt/mscan/gradle-init.gradle"
+AGENT_VALIDATOR="/opt/mscan/validate_agent_options.py"
 
 # Dockerfile에서 만들어 둔 캐시를 런타임에서도 그대로 쓰도록 고정
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-/opt/mscan/.gradle}"
@@ -38,7 +40,11 @@ while [[ $# -gt 0 ]]; do
     --jar-path|-j) JAR_PATH="$2"; shift 2;;
     --classpath-keywords|-k) KEYWORDS="$2"; shift 2;;
     --target-path|-t) TARGET_PATH="$2"; shift 2;;
-    --options-file|-o) OPTIONS_FILE="$2"; shift 2;;
+    # 하위 호환: 기존 --options-file 입력은 agent 옵션 파일로 간주
+    --options-file|-o) AGENT_OPTIONS_FILE="$2"; shift 2;;
+    --agent-options-file) AGENT_OPTIONS_FILE="$2"; shift 2;;
+    # Tai-e가 실제로 읽는 옵션 파일(기본값: MScan 내장 options.yml)
+    --taie-options-file) TAIE_OPTIONS_FILE="$2"; shift 2;;
     --reuse|-r) REUSE="true"; shift 1;;
     --gateway-yaml) GATEWAY_YAML="$2"; shift 2;;
     --out) OUT="$2"; shift 2;;
@@ -56,29 +62,21 @@ if [[ -z "$NAME" || -z "$JAR_PATH" || -z "$KEYWORDS" || -z "$GATEWAY_YAML" || -z
 fi
 
 # ---------------------------
-# OpenAI API 키 확인
-# gateway entry 추출용
-# ---------------------------
-if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "[mscan] OPENAI_API_KEY is required for entry extraction (dev mode)" >&2
-  exit 4
-fi
-
-# ---------------------------
 # 기본값 보정
 # ---------------------------
 if [[ -z "$TARGET_PATH" ]]; then
   TARGET_PATH="/tmp/${NAME}"
 fi
 
-if [[ -z "$OPTIONS_FILE" ]]; then
-  OPTIONS_FILE="${MSCAN_ROOT}/src/main/resources/options.yml"
+if [[ -z "$TAIE_OPTIONS_FILE" ]]; then
+  TAIE_OPTIONS_FILE="${MSCAN_ROOT}/src/main/resources/options.yml"
 fi
 
 echo "[debug] MSCAN_ROOT=$MSCAN_ROOT"
 echo "[debug] SCAN_DIR=$SCAN_DIR"
 echo "[debug] TARGET_PATH=$TARGET_PATH"
-echo "[debug] OPTIONS_FILE=$OPTIONS_FILE"
+echo "[debug] AGENT_OPTIONS_FILE=$AGENT_OPTIONS_FILE"
+echo "[debug] TAIE_OPTIONS_FILE=$TAIE_OPTIONS_FILE"
 echo "[debug] GRADLE_USER_HOME=$GRADLE_USER_HOME"
 echo "[debug] MSCAN_GRADLE_OFFLINE=$MSCAN_GRADLE_OFFLINE"
 
@@ -95,6 +93,11 @@ if [[ ! -f "$GRADLE_INIT_SCRIPT" ]]; then
   exit 8
 fi
 
+if [[ ! -f "$AGENT_VALIDATOR" ]]; then
+  echo "[mscan] validator script not found: $AGENT_VALIDATOR" >&2
+  exit 9
+fi
+
 echo "[debug] java-benchmarks exists"
 ls -la "${MSCAN_ROOT}"
 ls -la "${MSCAN_ROOT}/java-benchmarks"
@@ -108,29 +111,22 @@ mkdir -p "$(dirname "$OUT")"
 mkdir -p "$TARGET_PATH"
 mkdir -p "$GRADLE_USER_HOME"
 
-# gateway 입력 YAML 복사
-cp "$GATEWAY_YAML" "${SCAN_DIR}/input/${NAME}.yaml"
-
 # ---------------------------
-# 1단계: gateway entry rule 생성
+# 1단계: Agent 옵션 검증
+# - gateway_entry_scan의 LLM 경로는 미사용 처리
+# - agent options 파일 형식이 잘못되면 즉시 종료
 # ---------------------------
-pushd "$SCAN_DIR" >/dev/null
-python main.py
-popd >/dev/null
-
-RULE_JSON="${SCAN_DIR}/output/${NAME}.json"
-if [[ ! -f "$RULE_JSON" ]]; then
-  echo "[mscan] entry rule not generated: $RULE_JSON" >&2
-  exit 5
+if [[ -n "$AGENT_OPTIONS_FILE" ]]; then
+  python "$AGENT_VALIDATOR" --file "$AGENT_OPTIONS_FILE" --source-root /work/src
+else
+  # Agent 옵션이 없는 경우 검증은 건너뛰고 Tai-e 기본 옵션으로 실행
+  echo "[warn] AGENT_OPTIONS_FILE is empty; skipping agent schema validation"
 fi
-
-# 생성된 rule을 MScan resource 위치로 복사
-cp "$RULE_JSON" "${MSCAN_ROOT}/src/main/resources/entry/${NAME}.json"
 
 # ---------------------------
 # 2단계: Gradle 실행 인자 조립
 # ---------------------------
-GRADLE_ARGS="--name ${NAME} --jar-path ${JAR_PATH} --classpath-keywords ${KEYWORDS} --target-path ${TARGET_PATH} --options-file ${OPTIONS_FILE}"
+GRADLE_ARGS="--name ${NAME} --jar-path ${JAR_PATH} --classpath-keywords ${KEYWORDS} --target-path ${TARGET_PATH} --options-file ${TAIE_OPTIONS_FILE}"
 
 if [[ "$REUSE" == "true" ]]; then
   GRADLE_ARGS="${GRADLE_ARGS} --reuse"

@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import buaa.msasca.sca.app.worker.build.FileBasedBuildImageResolver;
 import buaa.msasca.sca.app.worker.config.props.BuildImagesProperties;
 import buaa.msasca.sca.app.worker.config.props.ToolImageProperties;
+import buaa.msasca.sca.app.worker.config.props.ToolCodeqlProperties;
 import buaa.msasca.sca.app.worker.config.props.ToolLlmProperties;
 import buaa.msasca.sca.app.worker.config.props.ToolMscanProperties;
 import buaa.msasca.sca.app.worker.tool.FileSystemServiceModuleScannerAdapter;
@@ -19,6 +20,7 @@ import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
+import buaa.msasca.sca.core.port.out.persistence.SanitizerResultCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
@@ -30,6 +32,7 @@ import buaa.msasca.sca.core.port.out.persistence.ToolRunPort;
 import buaa.msasca.sca.core.port.out.tool.AgentPort;
 import buaa.msasca.sca.core.port.out.tool.BuildImageResolver;
 import buaa.msasca.sca.core.port.out.tool.BuildPort;
+import buaa.msasca.sca.core.port.out.tool.CodeqlConfig;
 import buaa.msasca.sca.core.port.out.tool.CodeqlPort;
 import buaa.msasca.sca.core.port.out.tool.DockerImagePort;
 import buaa.msasca.sca.core.port.out.tool.MscanPort;
@@ -47,7 +50,7 @@ import buaa.msasca.sca.core.port.out.tool.ToolLlmConfig;
 @EnableConfigurationProperties({
     BuildImagesProperties.class,
     ToolImageProperties.class,
-    ToolImageProperties.class,
+    ToolCodeqlProperties.class,
     ToolLlmProperties.class,
     ToolMscanProperties.class
 })
@@ -109,6 +112,7 @@ public class WorkerWiringConfig {
         DockerImagePort dockerImagePort,
         StoragePort storagePort,
         CodeqlPort codeqlPort,
+        CodeqlConfig codeqlConfig,
         AgentPort agentPort,
         MscanPort mscanPort,
         ServiceModuleScannerPort serviceModuleScannerPort,
@@ -119,6 +123,7 @@ public class WorkerWiringConfig {
         MscanGatewayYamlCommandPort mscanGatewayYamlCommandPort,
         MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
         MscanResultPort mscanResultPort,
+        SanitizerResultCommandPort sanitizerResultCommandPort,
         ToolLlmConfig toolLlmConfig
     ) {
         return new PipelineExecutor(
@@ -133,6 +138,7 @@ public class WorkerWiringConfig {
             buildImageResolver,
             dockerImagePort,
             codeqlPort,
+            codeqlConfig,
             agentPort,
             mscanPort,
             serviceModuleScannerPort,
@@ -143,6 +149,7 @@ public class WorkerWiringConfig {
             mscanGatewayYamlCommandPort,
             mscanRunSummaryCommandPort,
             mscanResultPort,
+            sanitizerResultCommandPort,
             toolLlmConfig
         );
     }

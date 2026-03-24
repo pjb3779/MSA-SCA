@@ -64,6 +64,12 @@ public class ServiceModuleEntity extends AuditedEntity {
     @Column(name = "is_gateway", nullable = false)
     private boolean gateway;
 
+    @Column(name = "analysis_selected", nullable = false)
+    private boolean analysisSelected = true;
+
+    @Column(name = "analysis_selected_reason", length = 512)
+    private String analysisSelectedReason;
+
     private ServiceModuleEntity(ProjectVersionEntity pv, String name, String rootPath, BuildTool buildTool, String jdkVersion, boolean gateway) {
         this.projectVersion = pv;
         this.name = name;
@@ -89,5 +95,10 @@ public class ServiceModuleEntity extends AuditedEntity {
 
     public void changeGateway(boolean gateway) {
         this.gateway = gateway;
+    }
+
+    public void changeAnalysisSelection(boolean selected, String reason) {
+        this.analysisSelected = selected;
+        this.analysisSelectedReason = reason;
     }
 }

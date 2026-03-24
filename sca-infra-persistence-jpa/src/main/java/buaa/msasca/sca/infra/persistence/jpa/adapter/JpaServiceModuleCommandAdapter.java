@@ -68,4 +68,14 @@ public class JpaServiceModuleCommandAdapter implements  ServiceModuleCommandPort
         ServiceModuleEntity saved = repo.save(e);
         return mapper.toDomain(saved);
     }
+
+    @Override
+    @Transactional
+    public ServiceModule updateAnalysisSelection(Long serviceModuleId, boolean analysisSelected, String reason) {
+        ServiceModuleEntity e = repo.findById(serviceModuleId)
+            .orElseThrow(() -> new IllegalArgumentException("service_module not found: " + serviceModuleId));
+
+        e.changeAnalysisSelection(analysisSelected, reason);
+        return mapper.toDomain(repo.save(e));
+    }
 }

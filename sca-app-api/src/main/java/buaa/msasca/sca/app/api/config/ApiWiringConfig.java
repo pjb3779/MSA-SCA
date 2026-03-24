@@ -29,7 +29,10 @@ import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCacheComman
 import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
 import buaa.msasca.sca.core.port.out.tool.RunnerPort;
 import buaa.msasca.sca.core.port.out.tool.StoragePort;
+import buaa.msasca.sca.infra.runner.LocalProcessRunnerPortAdapter;
+import buaa.msasca.sca.infra.storage.local.LocalStoragePortAdapter;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -37,6 +40,26 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
 public class ApiWiringConfig {
+
+  /**
+   * API에서 사용하는 기본 RunnerPort.
+   * 별도 구현이 없을 때 로컬 프로세스 러너를 사용한다.
+   */
+  @Bean
+  @ConditionalOnMissingBean(RunnerPort.class)
+  public RunnerPort runnerPort() {
+    return new LocalProcessRunnerPortAdapter();
+  }
+
+  /**
+   * API에서 사용하는 기본 StoragePort.
+   * 별도 구현이 없을 때 로컬 스토리지를 사용한다.
+   */
+  @Bean
+  @ConditionalOnMissingBean(StoragePort.class)
+  public StoragePort storagePort() {
+    return new LocalStoragePortAdapter();
+  }
 
   /** workspace path resolver: Windows 경로 */
   @Bean

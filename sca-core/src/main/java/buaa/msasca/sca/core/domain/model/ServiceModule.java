@@ -9,5 +9,7 @@ public record ServiceModule(
     String rootPath,
     BuildTool buildTool,
     String jdkVersion,
-    boolean isGateway
+    boolean isGateway,
+    boolean analysisSelected,
+    String analysisSelectedReason
 ) {}

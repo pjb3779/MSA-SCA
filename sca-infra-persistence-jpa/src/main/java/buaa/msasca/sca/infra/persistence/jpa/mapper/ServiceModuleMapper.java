@@ -12,7 +12,9 @@ public class ServiceModuleMapper {
             e.getRootPath(),
             e.getBuildTool(),
             e.getJdkVersion(),
-            e.isGateway()
+            e.isGateway(),
+            e.isAnalysisSelected(),
+            e.getAnalysisSelectedReason()
         );
     }
 }

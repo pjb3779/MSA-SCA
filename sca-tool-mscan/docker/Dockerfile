@@ -37,6 +37,7 @@ RUN pip install --no-cache-dir -r /opt/mscan/mscan-src/gateway_entry_scan/requir
 # dev용 파일 덮어쓰기
 COPY docker/llm.py /opt/mscan/mscan-src/gateway_entry_scan/config/llm.py
 COPY docker/main.py /opt/mscan/mscan-src/gateway_entry_scan/main.py
+COPY docker/validate_agent_options.py /opt/mscan/validate_agent_options.py
 
 # entrypoint
 COPY docker/entrypoint.sh /opt/mscan/entrypoint.sh

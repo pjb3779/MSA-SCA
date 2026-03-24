@@ -41,8 +41,8 @@ public class MscanConfigAutoBuilder {
 
         mscan.put("classpathKeywords", keywords);
 
-        // 16GB 기본값
-        mscan.put("jvmArgs", "-Xmx2g -XX:MaxMetaspaceSize=512m");
+        // 16GB 환경 기본값
+        mscan.put("jvmArgs", "-Xmx6g -XX:MaxMetaspaceSize=1g");
         mscan.put("reuse", false);
 
         return root;

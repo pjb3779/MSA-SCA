@@ -54,7 +54,10 @@ public class RequestMscanOnlyRunService implements RequestMscanOnlyRunUseCase {
     Path jarDir = Path.of(sourceRoot).resolve(MSCAN_JAR_DIR_REL_PATH).normalize();
 
     try {
-      // 1) gateway.yml staging + DB READY upsert
+      // 1) gateway.yml staging + DB READY upsert (필수)
+      if (req.gatewayYaml() == null) {
+        throw new IllegalArgumentException("gatewayYaml is required");
+      }
       byte[] gwBytes = readAll(req.gatewayYaml());
       Files.createDirectories(gatewayPath.getParent());
       Files.write(gatewayPath, gwBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
@@ -75,7 +78,7 @@ public class RequestMscanOnlyRunService implements RequestMscanOnlyRunUseCase {
 
       gatewayYamlCommandPort.upsertReady(
           req.projectVersionId(),
-          GatewayYamlProvidedBy.USER_UPLOAD, // 테스트: 일단 USER_UPLOAD
+          GatewayYamlProvidedBy.USER_UPLOAD,
           storedGw.uri(),
           gwSha,
           gwName,

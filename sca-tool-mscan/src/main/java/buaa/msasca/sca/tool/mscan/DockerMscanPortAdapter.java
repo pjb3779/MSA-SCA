@@ -47,6 +47,22 @@ public class DockerMscanPortAdapter implements MscanPort {
 
       String gatewayInContainer = srcInContainer + "/.msasca/mscan/gateway.yml";
       String outInContainer = srcInContainer + "/.msasca/mscan/report.txt";
+      String optionsInContainer = null;
+
+      if (!isBlank(req.optionsFilePathOnHost())) {
+        try {
+          Path srcHost = Path.of(req.sourceRootPathOnHost()).toAbsolutePath().normalize();
+          Path optHost = Path.of(req.optionsFilePathOnHost()).toAbsolutePath().normalize();
+          if (optHost.startsWith(srcHost)) {
+            String rel = srcHost.relativize(optHost).toString().replace("\\", "/");
+            optionsInContainer = srcInContainer + "/" + rel;
+          } else {
+            optionsInContainer = req.optionsFilePathOnHost();
+          }
+        } catch (Exception ignored) {
+          optionsInContainer = req.optionsFilePathOnHost();
+        }
+      }
 
       // ------------------------------------------------------------
       // docker run 조립
@@ -57,12 +73,6 @@ public class DockerMscanPortAdapter implements MscanPort {
       if (dockerMemoryLimit != null) {
         cmd.addAll(List.of("--memory", dockerMemoryLimit));
       }
-
-      // dev: application.yml -> env 전달
-      // TODO(ops): 운영에서는 Secret YAML/Secret Store mount 방식으로 교체
-      cmd.addAll(List.of("-e", "OPENAI_API_KEY=" + safe(req.openAiApiKey())));
-      cmd.addAll(List.of("-e", "OPENAI_BASE_URL=" + safeOrDefault(req.openAiBaseUrl(), "https://openrouter.ai/api/v1")));
-      cmd.addAll(List.of("-e", "OPENAI_MODEL=" + safeOrDefault(req.openAiModel(), "deepseek/deepseek-r1")));
 
       // mount
       cmd.addAll(List.of("-v", req.sourceRootPathOnHost() + ":" + srcInContainer));
@@ -83,7 +93,7 @@ public class DockerMscanPortAdapter implements MscanPort {
 
       // optional flags
       if (!isBlank(req.optionsFilePathOnHost())) {
-        cmd.addAll(List.of("--options-file", req.optionsFilePathOnHost()));
+        cmd.addAll(List.of("--options-file", optionsInContainer));
       }
       if (req.reuse()) {
         cmd.add("--reuse");
@@ -120,7 +130,4 @@ public class DockerMscanPortAdapter implements MscanPort {
     return (s == null) ? "" : s;
   }
 
-  private static String safeOrDefault(String s, String def) {
-    return isBlank(s) ? def : s;
-  }
 }

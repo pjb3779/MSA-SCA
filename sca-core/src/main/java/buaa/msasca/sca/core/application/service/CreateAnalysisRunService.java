@@ -57,7 +57,7 @@ public class CreateAnalysisRunService implements CreateAnalysisRunUseCase {
      * configJson을 실행 가능한 형태로 정규화한다.
      * - mscan.name: 없으면 pv-{projectVersionId}로 채움
      * - mscan.classpathKeywords: 없으면 즉시 예외(필수)
-     * - jvmArgs 기본값(16GB 환경 고려): -Xmx2g -XX:MaxMetaspaceSize=512m
+     * - jvmArgs 기본값(16GB 환경 고려): -Xmx6g -XX:MaxMetaspaceSize=1g
      * - reuse 기본값 false
      * - openAiApiKey 같은 키는 제거(키는 worker application.yml로 주입)
      */
@@ -80,9 +80,9 @@ public class CreateAnalysisRunService implements CreateAnalysisRunUseCase {
 
         if (!mscan.has("reuse")) mscan.put("reuse", false);
 
-        // 16GB 기본값(너가 물어본 메모리 기준)
+        // 16GB 환경 기본값
         if (isBlank(mscan.path("jvmArgs").asText(null))) {
-            mscan.put("jvmArgs", "-Xmx2g -XX:MaxMetaspaceSize=512m");
+            mscan.put("jvmArgs", "-Xmx6g -XX:MaxMetaspaceSize=1g");
         }
 
         // 키는 config_json에 저장하지 않음(보안/정합)
