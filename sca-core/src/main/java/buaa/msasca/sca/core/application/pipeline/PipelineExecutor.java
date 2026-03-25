@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -21,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
+import buaa.msasca.sca.core.application.service.UnifiedTaintMergeService;
 import buaa.msasca.sca.core.domain.enums.ArtifactType;
 import buaa.msasca.sca.core.domain.enums.GatewayYamlProvidedBy;
 import buaa.msasca.sca.core.domain.enums.GatewayYamlStatus;
@@ -90,6 +92,7 @@ public class PipelineExecutor {
   private final MscanRunSummaryCommandPort mscanRunSummaryCommandPort;
   private final MscanResultPort mscanResultPort;
   private final SanitizerResultCommandPort sanitizerResultCommandPort;
+  private final UnifiedTaintMergeService unifiedTaintMergeService;
   private final ToolLlmConfig toolLlmConfig;
   private final ToolImageConfig toolImageConfig;
 
@@ -125,6 +128,7 @@ public class PipelineExecutor {
       MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
       MscanResultPort mscanResultPort,
       SanitizerResultCommandPort sanitizerResultCommandPort,
+      UnifiedTaintMergeService unifiedTaintMergeService,
       ToolLlmConfig toolLlmConfig
   ) {
     this.analysisRunCommandPort = analysisRunCommandPort;
@@ -150,6 +154,7 @@ public class PipelineExecutor {
     this.mscanRunSummaryCommandPort = mscanRunSummaryCommandPort;
     this.mscanResultPort = mscanResultPort;
     this.sanitizerResultCommandPort = sanitizerResultCommandPort;
+    this.unifiedTaintMergeService = unifiedTaintMergeService;
     this.toolLlmConfig = toolLlmConfig;
   }
 
@@ -202,6 +207,7 @@ public class PipelineExecutor {
       if (mscanOnly) {
         AgentPort.AgentKnowledge knowledge = runAgentKnowledgeStage(run.id(), run.projectVersionId(), sourceRootPath);
         runMscanStage(run, sourceRootPath, selectedModules, knowledge);
+        unifiedTaintMergeService.mergeAndStore(run.id());
         return;
       }
 
@@ -231,6 +237,7 @@ public class PipelineExecutor {
 
       //런 내부의 값을 반드시 읽어야함
       runMscanStage(run, sourceRootPath, selectedModules, knowledge);
+      unifiedTaintMergeService.mergeAndStore(run.id());
 
       log.info("[PIPE] finished OK analysisRunId={}", analysisRunId);
 
@@ -1432,17 +1439,97 @@ public class PipelineExecutor {
           }
         }
 
+        SinkMeta meta = parseSinkMetaFromSinkSig(sinkSig);
+
         result.add(new MscanResultPort.MscanFindingIngest(
             flowIndex,
             sourceSig,
             sinkSig,
             vulId,
-            line
+            line,
+            meta.sinkFilePath,
+            meta.sinkLine,
+            meta.sinkBasicBlock,
+            meta.sinkCallKind,
+            meta.sinkCallTarget
         ));
       });
       return result;
     } catch (Exception e) {
       throw new IllegalStateException("Failed to parse mscan report for findings: " + reportPath, e);
+    }
+  }
+
+  /** sinkSig에서 [n@Lx] + statement + invoke kind 등을 추출한다(추출 실패 시 null). */
+  private SinkMeta parseSinkMetaFromSinkSig(String sinkSig) {
+    if (sinkSig == null || sinkSig.isBlank()) return new SinkMeta(null, null, null, null, null);
+
+    // 예: <...>[8@L75] $r5 = invokeinterface ... /1
+    Integer stmtIndex = null;
+    Integer lineNumber = null;
+    String statement = null;
+
+    int locStart = sinkSig.indexOf('[');
+    int locEnd = (locStart >= 0) ? sinkSig.indexOf(']', locStart) : -1;
+    if (locStart >= 0 && locEnd > locStart) {
+      String loc = sinkSig.substring(locStart + 1, locEnd).trim(); // "8@L75"
+      int at = loc.indexOf("@L");
+      if (at > 0) {
+        try { stmtIndex = Integer.parseInt(loc.substring(0, at).trim()); } catch (Exception ignored) {}
+        try { lineNumber = Integer.parseInt(loc.substring(at + 2).trim()); } catch (Exception ignored) {}
+      }
+    }
+
+    // statement: ']' 다음부터 마지막 '/<n>' 직전까지
+    int stmtStart = (locEnd >= 0) ? (locEnd + 1) : -1;
+    if (stmtStart >= 0 && stmtStart < sinkSig.length()) {
+      String after = sinkSig.substring(stmtStart).trim();
+      int argSlash = after.lastIndexOf('/');
+      if (argSlash > 0) {
+        String maybeIdx = after.substring(argSlash + 1).trim();
+        if (maybeIdx.chars().allMatch(Character::isDigit)) {
+          statement = after.substring(0, argSlash).trim();
+        } else {
+          statement = after.trim();
+        }
+      } else {
+        statement = after.trim();
+      }
+      if (statement != null && statement.isBlank()) statement = null;
+    }
+
+    String callKind = extractInvokeKind(statement);
+    String callTarget = statement;
+
+    // 파일 경로는 샘플에 없어서 기본 null (추후 포맷 확장 시 여기서 추가 파싱)
+    return new SinkMeta(null, lineNumber, stmtIndex, callKind, callTarget);
+  }
+
+  private String extractInvokeKind(String statement) {
+    if (statement == null || statement.isBlank()) return null;
+    // Soot 스타일 키워드 우선 탐색
+    String s = statement.toLowerCase(Locale.ROOT);
+    if (s.contains("invokeinterface")) return "invokeinterface";
+    if (s.contains("invokestatic")) return "invokestatic";
+    if (s.contains("invokevirtual")) return "invokevirtual";
+    if (s.contains("invokespecial")) return "invokespecial";
+    if (s.contains("invokedynamic")) return "invokedynamic";
+    return null;
+  }
+
+  private static final class SinkMeta {
+    final String sinkFilePath;
+    final Integer sinkLine;
+    final Integer sinkBasicBlock;
+    final String sinkCallKind;
+    final String sinkCallTarget;
+
+    private SinkMeta(String sinkFilePath, Integer sinkLine, Integer sinkBasicBlock, String sinkCallKind, String sinkCallTarget) {
+      this.sinkFilePath = sinkFilePath;
+      this.sinkLine = sinkLine;
+      this.sinkBasicBlock = sinkBasicBlock;
+      this.sinkCallKind = sinkCallKind;
+      this.sinkCallTarget = sinkCallTarget;
     }
   }
 

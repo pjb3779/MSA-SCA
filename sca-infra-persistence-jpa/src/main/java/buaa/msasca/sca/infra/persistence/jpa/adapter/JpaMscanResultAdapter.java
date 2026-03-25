@@ -42,6 +42,20 @@ public class JpaMscanResultAdapter implements MscanResultPort {
                 f.vulId(),
                 f.rawFlowText()
             );
+            // sink 메타가 있으면 채움(그래프 드릴다운에서 유용)
+            if (f.sinkFilePath() != null
+                || f.sinkLine() != null
+                || f.sinkBasicBlock() != null
+                || f.sinkCallKind() != null
+                || f.sinkCallTarget() != null) {
+                e.attachSinkMeta(
+                    f.sinkFilePath(),
+                    f.sinkLine(),
+                    f.sinkBasicBlock(),
+                    f.sinkCallKind(),
+                    f.sinkCallTarget()
+                );
+            }
             findingRepo.save(e);
         }
     }

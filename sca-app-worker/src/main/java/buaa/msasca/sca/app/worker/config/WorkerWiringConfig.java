@@ -15,11 +15,13 @@ import buaa.msasca.sca.app.worker.config.props.ToolMscanProperties;
 import buaa.msasca.sca.app.worker.tool.FileSystemServiceModuleScannerAdapter;
 import buaa.msasca.sca.core.application.pipeline.PipelineExecutor;
 import buaa.msasca.sca.core.application.service.CodeqlSarifIngestService;
+import buaa.msasca.sca.core.application.service.UnifiedTaintMergeService;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisArtifactPort;
 import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanGatewayYamlPort;
+import buaa.msasca.sca.core.port.out.persistence.MscanFindingQueryPort;
 import buaa.msasca.sca.core.port.out.persistence.SanitizerResultCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanResultPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanRunSummaryCommandPort;
@@ -28,6 +30,8 @@ import buaa.msasca.sca.core.port.out.persistence.ServiceModuleCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.ToolRunPort;
+import buaa.msasca.sca.core.port.out.persistence.CodeqlFindingPort;
+import buaa.msasca.sca.core.port.out.persistence.UnifiedTaintRecordCommandPort;
 
 import buaa.msasca.sca.core.port.out.tool.AgentPort;
 import buaa.msasca.sca.core.port.out.tool.BuildImageResolver;
@@ -93,6 +97,15 @@ public class WorkerWiringConfig {
         return new CodeqlSarifIngestService(codeqlResultPort);
     }
 
+    @Bean
+    public UnifiedTaintMergeService unifiedTaintMergeService(
+        CodeqlFindingPort codeqlFindingPort,
+        MscanFindingQueryPort mscanFindingQueryPort,
+        UnifiedTaintRecordCommandPort unifiedTaintRecordCommandPort
+    ) {
+        return new UnifiedTaintMergeService(codeqlFindingPort, mscanFindingQueryPort, unifiedTaintRecordCommandPort);
+    }
+
     /**
      * 
      * PipelineExecutor를 구성한다.
@@ -124,6 +137,7 @@ public class WorkerWiringConfig {
         MscanRunSummaryCommandPort mscanRunSummaryCommandPort,
         MscanResultPort mscanResultPort,
         SanitizerResultCommandPort sanitizerResultCommandPort,
+        UnifiedTaintMergeService unifiedTaintMergeService,
         ToolLlmConfig toolLlmConfig
     ) {
         return new PipelineExecutor(
@@ -150,6 +164,7 @@ public class WorkerWiringConfig {
             mscanRunSummaryCommandPort,
             mscanResultPort,
             sanitizerResultCommandPort,
+            unifiedTaintMergeService,
             toolLlmConfig
         );
     }

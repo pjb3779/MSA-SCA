@@ -118,6 +118,31 @@ mkdir -p "$GRADLE_USER_HOME"
 # ---------------------------
 if [[ -n "$AGENT_OPTIONS_FILE" ]]; then
   python "$AGENT_VALIDATOR" --file "$AGENT_OPTIONS_FILE" --source-root /work/src
+
+  # Agent가 생성한 gateway-entries.json을 MScan entry 리소스 경로로 연결한다.
+  # 기존 gateway_entry_scan(main.py) 미사용 정책에서도 source entry가 반영되도록 한다.
+  GATEWAY_ENTRIES_SRC="$(python - "$AGENT_OPTIONS_FILE" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+agent = data.get("agent") or {}
+print(agent.get("gatewayEntries", "").strip())
+PY
+)"
+  if [[ -z "$GATEWAY_ENTRIES_SRC" ]]; then
+    echo "[mscan] gatewayEntries path is empty in agent options: $AGENT_OPTIONS_FILE" >&2
+    exit 22
+  fi
+  if [[ ! -f "$GATEWAY_ENTRIES_SRC" ]]; then
+    echo "[mscan] gatewayEntries file not found: $GATEWAY_ENTRIES_SRC" >&2
+    exit 22
+  fi
+
+  ENTRY_JSON="${MSCAN_ROOT}/src/main/resources/entry/${NAME}.json"
+  cp "$GATEWAY_ENTRIES_SRC" "$ENTRY_JSON"
+  echo "[debug] linked gateway entries: $GATEWAY_ENTRIES_SRC -> $ENTRY_JSON"
 else
   # Agent 옵션이 없는 경우 검증은 건너뛰고 Tai-e 기본 옵션으로 실행
   echo "[warn] AGENT_OPTIONS_FILE is empty; skipping agent schema validation"

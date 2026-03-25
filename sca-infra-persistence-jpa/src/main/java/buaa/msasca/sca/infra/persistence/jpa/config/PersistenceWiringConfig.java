@@ -8,6 +8,7 @@ import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaArtifactAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlFindingAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaCodeqlResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanGatewayYamlAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanFindingQueryAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaMscanRunSummaryAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaProjectAdapter;
@@ -17,6 +18,7 @@ import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaSanitizerResultAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleCommandAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaToolRunAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaUnifiedTaintRecordAdapter;
 
 import buaa.msasca.sca.infra.persistence.jpa.mapper.AnalysisRunMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ArtifactMapper;
@@ -40,6 +42,8 @@ import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionJpaReposit
 import buaa.msasca.sca.infra.persistence.jpa.repository.ProjectVersionSourceCacheJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ServiceModuleJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.ToolRunJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.TaintStepJpaRepository;
+import buaa.msasca.sca.infra.persistence.jpa.repository.UnifiedTaintRecordJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanGatewayYamlJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanRunSummaryJpaRepository;
 import buaa.msasca.sca.infra.persistence.jpa.repository.Mscan.MscanFindingJpaRepository;
@@ -223,6 +227,13 @@ public class PersistenceWiringConfig {
     }
 
     @Bean
+    public JpaMscanFindingQueryAdapter mscanFindingQueryAdapter(
+        MscanFindingJpaRepository findingRepo
+    ) {
+        return new JpaMscanFindingQueryAdapter(findingRepo);
+    }
+
+    @Bean
     public JpaCodeqlFindingAdapter codeqlFindingAdapter(
         CodeqlFindingJpaRepository findingRepo,
         CodeqlFlowJpaRepository flowRepo,
@@ -243,6 +254,23 @@ public class PersistenceWiringConfig {
             projectVersionRepo,
             registryRepo,
             candidateRepo
+        );
+    }
+
+    @Bean
+    public JpaUnifiedTaintRecordAdapter unifiedTaintRecordAdapter(
+        UnifiedTaintRecordJpaRepository unifiedRepo,
+        TaintStepJpaRepository stepRepo,
+        CodeqlFindingJpaRepository codeqlFindingRepo,
+        MscanFindingJpaRepository mscanFindingRepo,
+        ServiceModuleJpaRepository serviceModuleRepo
+    ) {
+        return new JpaUnifiedTaintRecordAdapter(
+            unifiedRepo,
+            stepRepo,
+            codeqlFindingRepo,
+            mscanFindingRepo,
+            serviceModuleRepo
         );
     }
 

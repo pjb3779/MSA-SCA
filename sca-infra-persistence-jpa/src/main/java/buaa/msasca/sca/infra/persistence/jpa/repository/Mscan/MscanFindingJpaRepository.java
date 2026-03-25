@@ -18,5 +18,13 @@ public interface MscanFindingJpaRepository extends JpaRepository<MscanFindingEnt
     List<Long> findIdsByToolRunId(@Param("toolRunId") Long toolRunId);
 
     void deleteByMscanRun_ToolRunId(Long toolRunId);
+
+    @Query("""
+        select f
+          from MscanFindingEntity f
+         where f.mscanRun.toolRun.analysisRun.id = :analysisRunId
+         order by f.flowIndex asc
+        """)
+    List<MscanFindingEntity> findByAnalysisRunId(@Param("analysisRunId") Long analysisRunId);
 }
 
