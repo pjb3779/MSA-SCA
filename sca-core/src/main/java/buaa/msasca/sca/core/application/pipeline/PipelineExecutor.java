@@ -1332,7 +1332,7 @@ public class PipelineExecutor {
         int count = countNonEmptyLines(report);
 
         // 개별 finding 파싱 및 저장
-        List<MscanResultPort.MscanFindingIngest> findings = parseMscanReport(report);
+        List<MscanResultPort.MscanFindingIngest> findings = parseMscanReport(report, sourceRootPath);
         mscanResultPort.replaceAll(tr.id(), findings);
 
         var status = (count == 0)
@@ -1383,7 +1383,7 @@ public class PipelineExecutor {
     }
   }
 
-  private List<MscanResultPort.MscanFindingIngest> parseMscanReport(Path reportPath) {
+  private List<MscanResultPort.MscanFindingIngest> parseMscanReport(Path reportPath, String sourceRootPath) {
     try (Stream<String> lines = Files.lines(reportPath, StandardCharsets.UTF_8)) {
       List<MscanResultPort.MscanFindingIngest> result = new ArrayList<>();
       lines.forEach(raw -> {
@@ -1439,7 +1439,7 @@ public class PipelineExecutor {
           }
         }
 
-        SinkMeta meta = parseSinkMetaFromSinkSig(sinkSig);
+        SinkMeta meta = parseSinkMetaFromSinkSig(sinkSig, sourceRootPath);
 
         result.add(new MscanResultPort.MscanFindingIngest(
             flowIndex,
@@ -1460,8 +1460,8 @@ public class PipelineExecutor {
     }
   }
 
-  /** sinkSig에서 [n@Lx] + statement + invoke kind 등을 추출한다(추출 실패 시 null). */
-  private SinkMeta parseSinkMetaFromSinkSig(String sinkSig) {
+  /** sinkSig에서 [n@Lx] + statement + invoke kind + sink 파일경로를 추출한다(추출 실패 시 null). */
+  private SinkMeta parseSinkMetaFromSinkSig(String sinkSig, String sourceRootPath) {
     if (sinkSig == null || sinkSig.isBlank()) return new SinkMeta(null, null, null, null, null);
 
     // 예: <...>[8@L75] $r5 = invokeinterface ... /1
@@ -1501,8 +1501,46 @@ public class PipelineExecutor {
     String callKind = extractInvokeKind(statement);
     String callTarget = statement;
 
-    // 파일 경로는 샘플에 없어서 기본 null (추후 포맷 확장 시 여기서 추가 파싱)
-    return new SinkMeta(null, lineNumber, stmtIndex, callKind, callTarget);
+    String sinkFilePath = resolveSinkFilePathFromSignature(sinkSig, sourceRootPath);
+    return new SinkMeta(sinkFilePath, lineNumber, stmtIndex, callKind, callTarget);
+  }
+
+  /**
+   * sink signature에서 FQCN을 추출해 sourceRoot 하위 실제 파일 경로를 해석한다.
+   *
+   * 예: "<com.foo.BarService: ...>[8@L75] ..." -> ".../src/main/java/com/foo/BarService.java"
+   */
+  private String resolveSinkFilePathFromSignature(String sinkSig, String sourceRootPath) {
+    if (sinkSig == null || sinkSig.isBlank()) return null;
+    if (sourceRootPath == null || sourceRootPath.isBlank()) return null;
+
+    int lt = sinkSig.indexOf('<');
+    int colon = sinkSig.indexOf(':', lt + 1);
+    if (lt < 0 || colon <= lt + 1) return null;
+
+    String fqcn = sinkSig.substring(lt + 1, colon).trim();
+    if (fqcn.isBlank()) return null;
+
+    String relJava = fqcn.replace('.', '/') + ".java";
+    String relKotlin = fqcn.replace('.', '/') + ".kt";
+    Path root = Path.of(sourceRootPath);
+
+    List<Path> candidates = new ArrayList<>();
+    try (Stream<Path> s = Files.find(root, 14, (p, attr) -> {
+      if (!attr.isRegularFile()) return false;
+      String unixPath = p.toString().replace("\\", "/");
+      return unixPath.endsWith("/" + relJava) || unixPath.endsWith("/" + relKotlin);
+    })) {
+      candidates = s.toList();
+    } catch (Exception ignored) {
+      return null;
+    }
+
+    if (candidates.isEmpty()) return null;
+    Path best = candidates.stream()
+        .min(Comparator.comparingInt(p -> p.toString().length()))
+        .orElse(candidates.get(0));
+    return best.toString().replace("\\", "/");
   }
 
   private String extractInvokeKind(String statement) {

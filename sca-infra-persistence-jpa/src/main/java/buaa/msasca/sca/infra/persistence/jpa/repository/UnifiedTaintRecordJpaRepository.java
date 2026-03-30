@@ -13,8 +13,16 @@ public interface UnifiedTaintRecordJpaRepository extends JpaRepository<UnifiedTa
   @Query("""
       select u.id
         from UnifiedTaintRecordEntity u
-       where (u.codeqlFinding is not null and u.codeqlFinding.codeqlRun.toolRun.analysisRun.id = :analysisRunId)
-          or (u.mscanFinding is not null and u.mscanFinding.mscanRun.toolRun.analysisRun.id = :analysisRunId)
+        left join u.codeqlFinding cf
+        left join cf.codeqlRun crr
+        left join crr.toolRun ctr
+        left join ctr.analysisRun ar1
+        left join u.mscanFinding mf
+        left join mf.mscanRun mrr
+        left join mrr.toolRun mtr
+        left join mtr.analysisRun ar2
+       where ar1.id = :analysisRunId
+          or ar2.id = :analysisRunId
       """)
   List<Long> findIdsByAnalysisRunId(@Param("analysisRunId") Long analysisRunId);
 }

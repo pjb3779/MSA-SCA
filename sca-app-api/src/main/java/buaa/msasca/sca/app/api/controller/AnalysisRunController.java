@@ -87,4 +87,28 @@ public class AnalysisRunController {
             run.updatedAt()
         );
     }
+
+    /**
+     * project_version 기준 최신 analysis_run 조회
+     *
+     * @param projectVersionId project_version ID
+     * @return 최신 analysis_run 상태 정보
+     */
+    @GetMapping("/project-versions/{projectVersionId}/analysis-runs/latest")
+    public AnalysisRunResponse getLatestByProjectVersion(@PathVariable Long projectVersionId) {
+        var run = getUseCase.findLatestByProjectVersionId(projectVersionId)
+            .orElseThrow(() -> new IllegalArgumentException(
+                "latest analysis_run not found for projectVersionId=" + projectVersionId
+            ));
+
+        return new AnalysisRunResponse(
+            run.id(),
+            run.projectVersionId(),
+            run.status(),
+            run.startedAt(),
+            run.finishedAt(),
+            run.createdAt(),
+            run.updatedAt()
+        );
+    }
 }

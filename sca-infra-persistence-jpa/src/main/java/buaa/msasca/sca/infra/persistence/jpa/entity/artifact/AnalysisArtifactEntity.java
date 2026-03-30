@@ -57,7 +57,7 @@ public class AnalysisArtifactEntity extends CreatedEntity {
     private String storagePath;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "metadata_json", columnDefinition = "jsonb")
+    @Column(name = "metadata_json")
     private JsonNode metadataJson;
 
     private AnalysisArtifactEntity(ToolRunEntity toolRun, ArtifactType artifactType, String storagePath, JsonNode metadataJson) {

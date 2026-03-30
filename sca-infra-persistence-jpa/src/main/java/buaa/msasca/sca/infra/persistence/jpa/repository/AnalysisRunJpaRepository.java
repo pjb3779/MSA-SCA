@@ -11,9 +11,16 @@ import buaa.msasca.sca.infra.persistence.jpa.entity.run.AnalysisRunEntity;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface AnalysisRunJpaRepository extends JpaRepository<AnalysisRunEntity, Long> {
   List<AnalysisRunEntity> findByStatusOrderByCreatedAtAsc(RunStatus status, Pageable pageable);
+
+  /**
+   * project_version 기준 최신 run 1건을 조회한다.
+   * created_at DESC 기준으로 가장 최근 레코드를 반환한다.
+   */
+  Optional<AnalysisRunEntity> findTopByProjectVersion_IdOrderByCreatedAtDesc(Long projectVersionId);
 
   /**
    * PENDING -> RUNNING 클레임 (원자적 전이)

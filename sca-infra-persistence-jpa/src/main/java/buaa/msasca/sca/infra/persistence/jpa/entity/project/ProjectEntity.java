@@ -31,7 +31,7 @@ import lombok.NoArgsConstructor;
 public class ProjectEntity extends AuditedEntity {
 
   @Id
-  @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "progect_seq_gen")
+  @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "project_seq_gen")
   private Long id;
 
   @Column(length = 255, nullable = false)

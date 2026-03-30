@@ -65,6 +65,19 @@ public class JpaAnalysisRunAdapter implements AnalysisRunCommandPort {
     }
 
     /**
+     * project_version 기준으로 최신 run 1건을 조회한다.
+     *
+     * @param projectVersionId project_version id
+     * @return optional
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<AnalysisRun> findLatestByProjectVersionId(Long projectVersionId) {
+        return runRepo.findTopByProjectVersion_IdOrderByCreatedAtDesc(projectVersionId)
+            .map(mapper::toDomain);
+    }
+
+    /**
      * status 기준 오래된 순서 조회.
      *
      * @param status 상태

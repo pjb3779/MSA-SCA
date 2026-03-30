@@ -52,7 +52,7 @@ public class AnalysisRunEntity extends AuditedEntity {
   private ProjectVersionEntity projectVersion;
 
   @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "config_json", columnDefinition = "jsonb")
+  @Column(name = "config_json")
   private JsonNode configJson;
 
   @Enumerated(EnumType.STRING)

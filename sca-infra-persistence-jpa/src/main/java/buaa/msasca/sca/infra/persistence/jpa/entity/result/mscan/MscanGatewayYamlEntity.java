@@ -65,7 +65,7 @@ public class MscanGatewayYamlEntity extends AuditedEntity {
     private String cacheRelPath;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "metadata_json", columnDefinition = "jsonb")
+    @Column(name = "metadata_json")
     private JsonNode metadataJson;
 
     private MscanGatewayYamlEntity(ProjectVersionEntity pv, String cacheRelPath) {

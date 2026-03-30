@@ -70,7 +70,7 @@ public class SanitizerEvidenceEntity extends CreatedEntity {
     private String snippetText;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "metadata_json", columnDefinition = "jsonb")
+    @Column(name = "metadata_json")
     private JsonNode metadataJson;
 
     private SanitizerEvidenceEntity(SanitizerCandidateEntity candidate, EvidenceType type) {

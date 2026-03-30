@@ -56,7 +56,7 @@ public class CodeqlFindingEntity extends CreatedEntity {
     private String level;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "tags_json", columnDefinition = "jsonb")
+    @Column(name = "tags_json")
     private JsonNode tagsJson;
 
     @Column(name = "help_text", columnDefinition = "text")
