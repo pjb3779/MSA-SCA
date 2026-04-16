@@ -106,7 +106,7 @@ public class RequestMscanOnlyRunService implements RequestMscanOnlyRunUseCase {
       ObjectNode mscan = cfg.putObject("mscan");
       mscan.put("name", isBlank(req.mscanName()) ? ("pv-" + req.projectVersionId()) : req.mscanName());
       mscan.put("classpathKeywords", req.classpathKeywords()); // 필수
-      mscan.put("jvmArgs", isBlank(req.jvmArgs()) ? "-Xmx2g -XX:MaxMetaspaceSize=512m" : req.jvmArgs());
+      mscan.put("jvmArgs", isBlank(req.jvmArgs()) ? "-Xmx6g -XX:MaxMetaspaceSize=1g" : req.jvmArgs());
       mscan.put("reuse", req.reuse() != null && req.reuse());
       if (!isBlank(req.optionsFileRelPath())) {
         mscan.put("optionsFileRelPath", req.optionsFileRelPath());

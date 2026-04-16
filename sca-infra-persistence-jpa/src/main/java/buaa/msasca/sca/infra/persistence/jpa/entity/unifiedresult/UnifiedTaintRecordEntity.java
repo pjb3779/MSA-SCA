@@ -2,6 +2,7 @@ package buaa.msasca.sca.infra.persistence.jpa.entity.unifiedresult;
 
 import buaa.msasca.sca.core.domain.enums.Severity;
 import buaa.msasca.sca.infra.persistence.jpa.entity.base.AuditedEntity;
+import buaa.msasca.sca.infra.persistence.jpa.entity.project.ServiceModuleEntity;
 import buaa.msasca.sca.infra.persistence.jpa.entity.result.codeql.CodeqlFindingEntity;
 import buaa.msasca.sca.infra.persistence.jpa.entity.result.mscan.MscanFindingEntity;
 import jakarta.persistence.Column;
@@ -29,7 +30,8 @@ import lombok.NoArgsConstructor;
     indexes = {
         @Index(name = "idx_unified_codeql", columnList = "codeql_finding_id"),
         @Index(name = "idx_unified_mscan", columnList = "mscan_finding_id"),
-        @Index(name = "idx_unified_severity", columnList = "severity")
+        @Index(name = "idx_unified_severity", columnList = "severity"),
+        @Index(name = "idx_unified_scope_module", columnList = "scope_service_module_id")
     }
 )
 @SequenceGenerator(
@@ -50,6 +52,14 @@ public class UnifiedTaintRecordEntity extends AuditedEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "mscan_finding_id")
     private MscanFindingEntity mscanFinding;
+
+    /**
+     * 도구 실행 단위(CodeQL codeql_run_detail / MScan 서비스) 기준 소속 서비스.
+     * 조회·그래프에서 조인 없이 그룹핑하기 위해 머지 시점에 저장한다.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "scope_service_module_id")
+    private ServiceModuleEntity scopeServiceModule;
 
     @Column(name = "vulnerability_type", length = 255, nullable = false)
     private String vulnerabilityType;
@@ -88,6 +98,10 @@ public class UnifiedTaintRecordEntity extends AuditedEntity {
     public void link(CodeqlFindingEntity codeql, MscanFindingEntity mscan) {
         this.codeqlFinding = codeql;
         this.mscanFinding = mscan;
+    }
+
+    public void assignScopeServiceModule(ServiceModuleEntity scopeServiceModule) {
+        this.scopeServiceModule = scopeServiceModule;
     }
 
     public void describe(String description, Severity severity) {

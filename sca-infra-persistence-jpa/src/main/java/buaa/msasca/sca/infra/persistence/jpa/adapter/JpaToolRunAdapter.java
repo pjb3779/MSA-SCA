@@ -1,6 +1,7 @@
 package buaa.msasca.sca.infra.persistence.jpa.adapter;
 
 import java.util.Optional;
+import java.util.List;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +63,14 @@ public class JpaToolRunAdapter implements ToolRunCommandPort, ToolRunPort {
     @Override
     public Optional<ToolRun> findById(Long toolRunId) {
         return toolRunRepo.findById(toolRunId).map(mapper::toDomain);
+    }
+
+    @Override
+    public List<ToolRun> findByAnalysisRunId(Long analysisRunId) {
+        if (analysisRunId == null) return List.of();
+        return toolRunRepo.findByAnalysisRun_Id(analysisRunId).stream()
+            .map(mapper::toDomain)
+            .toList();
     }
 
     @Override

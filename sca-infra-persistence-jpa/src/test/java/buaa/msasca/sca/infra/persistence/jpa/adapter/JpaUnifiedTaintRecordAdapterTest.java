@@ -91,7 +91,11 @@ class JpaUnifiedTaintRecordAdapterTest {
         RoleType.SOURCE,
         "A.java",
         10,
-        "source"
+        "source",
+        "A",
+        "sourceMethod",
+        "A.sourceMethod()",
+        "10: source()"
     );
     UnifiedTaintRecordCommandPort.TaintStepUpsert s1 = new UnifiedTaintRecordCommandPort.TaintStepUpsert(
         1,
@@ -99,12 +103,17 @@ class JpaUnifiedTaintRecordAdapterTest {
         RoleType.SINK,
         "B.java",
         20,
-        "sink"
+        "sink",
+        "B",
+        "sinkMethod",
+        "B.sinkMethod()",
+        "20: sink()"
     );
 
     UnifiedTaintRecordCommandPort.UnifiedTaintUpsert newUpsert = new UnifiedTaintRecordCommandPort.UnifiedTaintUpsert(
         null,
         mscanFinding.getId(),
+        sm.getId(),
         "",                 // vulnerabilityType 비면 기본값으로 채워져야 함
         "",                 // title 비면 기본값으로 채워져야 함
         "desc",
@@ -136,6 +145,8 @@ class JpaUnifiedTaintRecordAdapterTest {
     assertThat(saved.getVulnerabilityType()).isEqualTo("UNKNOWN");
     assertThat(saved.getTitle()).isEqualTo("unknown finding");
     assertThat(saved.getSeverity()).isEqualTo(Severity.HIGH);
+    assertThat(saved.getScopeServiceModule()).isNotNull();
+    assertThat(saved.getScopeServiceModule().getId()).isEqualTo(sm.getId());
   }
 }
 

@@ -101,9 +101,19 @@ public class WorkerWiringConfig {
     public UnifiedTaintMergeService unifiedTaintMergeService(
         CodeqlFindingPort codeqlFindingPort,
         MscanFindingQueryPort mscanFindingQueryPort,
-        UnifiedTaintRecordCommandPort unifiedTaintRecordCommandPort
+        UnifiedTaintRecordCommandPort unifiedTaintRecordCommandPort,
+        AnalysisRunCommandPort analysisRunCommandPort,
+        ProjectVersionSourceCachePort sourceCachePort,
+        ServiceModulePort serviceModulePort
     ) {
-        return new UnifiedTaintMergeService(codeqlFindingPort, mscanFindingQueryPort, unifiedTaintRecordCommandPort);
+        return new UnifiedTaintMergeService(
+            codeqlFindingPort,
+            mscanFindingQueryPort,
+            unifiedTaintRecordCommandPort,
+            analysisRunCommandPort,
+            sourceCachePort,
+            serviceModulePort
+        );
     }
 
     /**

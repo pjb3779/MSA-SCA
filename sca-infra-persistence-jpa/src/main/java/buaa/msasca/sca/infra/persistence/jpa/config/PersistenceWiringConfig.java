@@ -19,6 +19,7 @@ import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaServiceModuleCommandAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaToolRunAdapter;
 import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaUnifiedTaintRecordAdapter;
+import buaa.msasca.sca.infra.persistence.jpa.adapter.JpaUnifiedResultQueryAdapter;
 
 import buaa.msasca.sca.infra.persistence.jpa.mapper.AnalysisRunMapper;
 import buaa.msasca.sca.infra.persistence.jpa.mapper.ArtifactMapper;
@@ -272,6 +273,16 @@ public class PersistenceWiringConfig {
             mscanFindingRepo,
             serviceModuleRepo
         );
+    }
+
+    @Bean
+    public JpaUnifiedResultQueryAdapter unifiedResultQueryAdapter(
+        UnifiedTaintRecordJpaRepository unifiedRepo,
+        TaintStepJpaRepository stepRepo,
+        AnalysisRunJpaRepository analysisRunRepo,
+        ServiceModuleJpaRepository serviceModuleRepo
+    ) {
+        return new JpaUnifiedResultQueryAdapter(unifiedRepo, stepRepo, analysisRunRepo, serviceModuleRepo);
     }
 
 }

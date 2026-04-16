@@ -51,6 +51,6 @@ sca:
     llm:
       # 지금 api-key는 5달러가 한도 원래는 시크릿.얌으로 해야하지만 개발중이니까 그냥 구현
       # TODO(ops): 운영에서는 Secret YAML/Secret Store로 교체할 것
-      openai-api-key: "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"
+      openai-api-key: "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"
       openai-base-url: "https://openrouter.ai/api/v1"
       openai-model: "deepseek/deepseek-r1"

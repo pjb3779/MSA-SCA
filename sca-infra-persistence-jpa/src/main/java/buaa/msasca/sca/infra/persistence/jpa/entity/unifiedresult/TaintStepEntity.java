@@ -66,6 +66,18 @@ public class TaintStepEntity extends CreatedEntity {
     @Column(columnDefinition = "text")
     private String description;
 
+    @Column(name = "class_name", length = 512)
+    private String className;
+
+    @Column(name = "method_name", length = 512)
+    private String methodName;
+
+    @Column(name = "method_signature", length = 1024)
+    private String methodSignature;
+
+    @Column(name = "code_snippet", columnDefinition = "text")
+    private String codeSnippet;
+
     private TaintStepEntity(UnifiedTaintRecordEntity record, int stepIndex) {
         this.record = record;
         this.stepIndex = stepIndex;
@@ -75,11 +87,25 @@ public class TaintStepEntity extends CreatedEntity {
         return new TaintStepEntity(record, stepIndex);
     }
 
-    public void attach(ServiceModuleEntity sm, RoleType role, String filePath, Integer lineNumber, String description) {
+    public void attach(
+        ServiceModuleEntity sm,
+        RoleType role,
+        String filePath,
+        Integer lineNumber,
+        String description,
+        String className,
+        String methodName,
+        String methodSignature,
+        String codeSnippet
+    ) {
         this.serviceModule = sm;
         this.role = role;
         this.filePath = filePath;
         this.lineNumber = lineNumber;
         this.description = description;
+        this.className = className;
+        this.methodName = methodName;
+        this.methodSignature = methodSignature;
+        this.codeSnippet = codeSnippet;
     }
 }

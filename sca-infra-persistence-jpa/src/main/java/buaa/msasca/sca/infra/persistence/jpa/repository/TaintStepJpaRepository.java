@@ -8,5 +8,6 @@ import buaa.msasca.sca.infra.persistence.jpa.entity.unifiedresult.TaintStepEntit
 
 public interface TaintStepJpaRepository extends JpaRepository<TaintStepEntity, Long> {
   void deleteByRecord_IdIn(List<Long> recordIds);
+  List<TaintStepEntity> findByRecord_IdIn(List<Long> recordIds);
 }
 

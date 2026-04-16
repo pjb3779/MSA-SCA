@@ -62,6 +62,10 @@ public class JpaUnifiedTaintRecordAdapter implements UnifiedTaintRecordCommandPo
       e.link(codeql, mscan);
       e.describe(r.description(), r.severity());
       e.setEndpoints(r.sourceFilePath(), r.sourceLine(), r.sinkFilePath(), r.sinkLine());
+      ServiceModuleEntity scopeSm = (r.scopeServiceModuleId() == null)
+          ? null
+          : serviceModuleRepo.findById(r.scopeServiceModuleId()).orElse(null);
+      e.assignScopeServiceModule(scopeSm);
       UnifiedTaintRecordEntity saved = unifiedRepo.save(e);
 
       if (r.steps() != null) {
@@ -71,7 +75,17 @@ public class JpaUnifiedTaintRecordAdapter implements UnifiedTaintRecordCommandPo
           ServiceModuleEntity sm = (s.serviceModuleId() == null)
               ? null
               : serviceModuleRepo.findById(s.serviceModuleId()).orElse(null);
-          step.attach(sm, s.role(), s.filePath(), s.lineNumber(), s.description());
+          step.attach(
+              sm,
+              s.role(),
+              s.filePath(),
+              s.lineNumber(),
+              s.description(),
+              s.className(),
+              s.methodName(),
+              s.methodSignature(),
+              s.codeSnippet()
+          );
           stepRepo.save(step);
         }
       }

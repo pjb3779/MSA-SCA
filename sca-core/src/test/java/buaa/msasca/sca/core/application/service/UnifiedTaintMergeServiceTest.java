@@ -4,11 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -16,10 +20,17 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import buaa.msasca.sca.core.domain.enums.BuildTool;
 import buaa.msasca.sca.core.domain.enums.RoleType;
+import buaa.msasca.sca.core.domain.enums.RunStatus;
 import buaa.msasca.sca.core.domain.enums.Severity;
+import buaa.msasca.sca.core.domain.model.AnalysisRun;
+import buaa.msasca.sca.core.domain.model.ServiceModule;
+import buaa.msasca.sca.core.port.out.persistence.AnalysisRunCommandPort;
 import buaa.msasca.sca.core.port.out.persistence.CodeqlFindingPort;
 import buaa.msasca.sca.core.port.out.persistence.MscanFindingQueryPort;
+import buaa.msasca.sca.core.port.out.persistence.ProjectVersionSourceCachePort;
+import buaa.msasca.sca.core.port.out.persistence.ServiceModulePort;
 import buaa.msasca.sca.core.port.out.persistence.UnifiedTaintRecordCommandPort;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,8 +45,22 @@ class UnifiedTaintMergeServiceTest {
   @Mock
   private UnifiedTaintRecordCommandPort unifiedTaintRecordCommandPort;
 
+  @Mock
+  private AnalysisRunCommandPort analysisRunCommandPort;
+
+  @Mock
+  private ProjectVersionSourceCachePort sourceCachePort;
+
+  @Mock
+  private ServiceModulePort serviceModulePort;
+
   @InjectMocks
   private UnifiedTaintMergeService service;
+
+  @BeforeEach
+  void defaultStubs() {
+    lenient().when(analysisRunCommandPort.findById(anyLong())).thenReturn(Optional.empty());
+  }
 
   /**
    * 시나리오:
@@ -119,6 +144,7 @@ class UnifiedTaintMergeServiceTest {
     assertEquals(10, u0.sourceLine());
     assertEquals("/src/C.java", u0.sinkFilePath());
     assertEquals(12, u0.sinkLine());
+    assertEquals(100L, u0.scopeServiceModuleId());
 
     assertEquals(3, u0.steps().size());
     assertEquals(RoleType.SOURCE, u0.steps().get(0).role());
@@ -138,6 +164,7 @@ class UnifiedTaintMergeServiceTest {
     assertNull(u1.sourceLine());
     assertEquals("/other/Other.java", u1.sinkFilePath());
     assertEquals(30, u1.sinkLine());
+    assertEquals(3000L, u1.scopeServiceModuleId());
 
     assertEquals(2, u1.steps().size());
     assertEquals(RoleType.SOURCE, u1.steps().get(0).role());
@@ -210,6 +237,72 @@ class UnifiedTaintMergeServiceTest {
     assertEquals("/a/b.java", u.sinkFilePath());
     // sinkLine은 mscan의 sinkLine이 아니라 CodeQL의 기본 라인을 우선 사용한다.
     assertEquals(100, u.sinkLine());
+    assertEquals(101L, u.scopeServiceModuleId());
+  }
+
+  /**
+   * CodeQL/MScan이 service_module_id를 넘기지 않아도, 파일 경로가 등록된 모듈 root_path와 맞으면 FK를 채운다.
+   */
+  @Test
+  void mergeAndStore_fillsServiceModuleIdFromFilePathWhenToolIdsMissing() {
+    Long analysisRunId = 42L;
+    List<CodeqlFindingPort.FlowStepView> steps = List.of(
+        new CodeqlFindingPort.FlowStepView(
+            0,
+            "C:/msasca/projects/1/source/spring-cloud-skipper/spring-cloud-skipper-server-core/src/main/java/Foo.java",
+            10,
+            "s0")
+    );
+    CodeqlFindingPort.CodeqlFindingView c1 = new CodeqlFindingPort.CodeqlFindingView(
+        1L,
+        null,
+        "",
+        "RULE",
+        "msg",
+        "high",
+        "C:/msasca/projects/1/source/spring-cloud-skipper/spring-cloud-skipper-server-core/src/main/java/Foo.java",
+        10,
+        steps
+    );
+
+    when(codeqlFindingPort.findByAnalysisRunId(analysisRunId)).thenReturn(List.of(c1));
+    when(mscanFindingQueryPort.findByAnalysisRunId(analysisRunId)).thenReturn(List.of());
+
+    AnalysisRun run = new AnalysisRun(
+        analysisRunId,
+        7L,
+        null,
+        RunStatus.DONE,
+        null,
+        null,
+        null,
+        Instant.now(),
+        Instant.now());
+    when(analysisRunCommandPort.findById(analysisRunId)).thenReturn(Optional.of(run));
+    when(sourceCachePort.findValidByProjectVersionId(7L)).thenReturn(Optional.empty());
+    ServiceModule mod = new ServiceModule(
+        55L,
+        7L,
+        "spring-cloud-skipper-server-core",
+        "spring-cloud-skipper-server-core",
+        BuildTool.GRADLE,
+        "17",
+        false,
+        true,
+        null);
+    when(serviceModulePort.findByProjectVersionId(7L)).thenReturn(List.of(mod));
+
+    ArgumentCaptor<List<UnifiedTaintRecordCommandPort.UnifiedTaintUpsert>> outCaptor =
+        ArgumentCaptor.forClass(List.class);
+
+    service.mergeAndStore(analysisRunId);
+
+    verify(unifiedTaintRecordCommandPort).replaceByAnalysisRun(anyLong(), outCaptor.capture());
+    List<UnifiedTaintRecordCommandPort.UnifiedTaintUpsert> out = outCaptor.getValue();
+    assertEquals(1, out.size());
+    assertEquals(1, out.get(0).steps().size());
+    assertEquals(55L, out.get(0).steps().get(0).serviceModuleId());
+    assertEquals(55L, out.get(0).scopeServiceModuleId());
   }
 }
 
